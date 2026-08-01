@@ -16,9 +16,6 @@ def format_result(d: dict) -> str:
         f"📌 Holat: *{d['pass_status']}* {status_emoji}",
     ]
 
-    if d.get("threshold"):
-        lines.append(f"🔰 O'tish chegarasi: {d['threshold']}")
-
     if d.get("rank"):
         lines.append(f"🏆 Umumiy o'rin: *{d['rank']}-o'rin*")
 
@@ -53,7 +50,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• 👤 Ism\n"
         "• 📊 To'plangan ball\n"
         "• 📌 O'tdi / O'tmadi\n"
-        "• 🔰 O'tish chegarasi\n"
         "• 🏆 Umumiy o'rin\n"
         "• 📚 Fanlar",
         parse_mode="Markdown"
