@@ -45,7 +45,7 @@ def _get_sheet() -> gspread.Worksheet:
 
 
 def _all_records() -> list[dict]:
-    return _get_sheet().get_all_records()
+    return _get_sheet().get_all_records(expected_headers=HEADERS)
 
 
 def _row_num(records: list[dict], uid: str):
@@ -127,11 +127,12 @@ def get_users_page(page: int) -> tuple[list, int]:
 
 def format_result(d: dict) -> str:
     status_emoji = "\u2705" if d["is_pass"] else "\u274c"
+    name = escape_md(str(d.get("name") or ""))
     lines = [
-        f"\U0001f464 *{d['name']}*",
+        f"\U0001f464 *{name}*",
         f"\U0001f194 ID: `{d['id']}`",
         f"\U0001f4ca Ball: *{d['score']}*",
-        f"\U0001f4cc Holat: *{d['pass_status']}* {status_emoji}",
+        f"\U0001f4cc Holat: *{escape_md(str(d.get('pass_status') or ''))}* {status_emoji}",
     ]
     if d.get("rank"):
         if d.get("page_link"):
@@ -142,8 +143,8 @@ def format_result(d: dict) -> str:
         else:
             lines.append(f"\U0001f3c6 Umumiy o'rin: *{d['rank']}-o'rin*")
     subjects = []
-    if d.get("s4subject"): subjects.append(d["s4subject"])
-    if d.get("s5subject"): subjects.append(d["s5subject"])
+    if d.get("s4subject"): subjects.append(escape_md(str(d["s4subject"])))
+    if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
     if subjects:
         lines.append(f"\U0001f4da Fanlar: {' | '.join(subjects)}")
     return "\n".join(lines)
