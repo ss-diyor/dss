@@ -35,10 +35,11 @@ def format_result(d: dict) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Assalomu alaykum, hurmatli abituriyent \n\n"
+        "Assalomu alaykum, hurmatli abituriyent 👋\n\n"
         "Ushbu bot orqali siz umumiy o'rningizni bilib olishingiz mumkin.\n"
         "Shunchaki 7 xonali abituriyent ID raqamini yuboring.\n\n"
-        "Misol:\n`1234567`",
+        "Misol:\n`1234567`\n\n"
+        "\"Saytda ko'rish\" ni bosish orqali siz mandat.uzbmb.uz saytida aynan qaysi sahifada ekanligingizni bilib olishingiz mumkin.",
         parse_mode="Markdown"
     )
 
