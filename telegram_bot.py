@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import gspread
 from google.oauth2.service_account import Credentials
-from scraper import get_student_data
+from scraper import get_student_data, get_total_count
 
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -222,10 +222,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     print(f"[scraper] status={result['status']}")
 
     if result["status"] == "success":
+        d = result["data"]
+
+        # 1-xabar: darhol natija (total_count siz)
         await update.message.reply_text(
-            "\u2705 *Natija topildi:*\n\n" + format_result(result["data"]),
+            "\u2705 *Natija topildi:*\n\n" + format_result(d),
             parse_mode="Markdown",
         )
+
+        # 2-xabar: jami hisoblanmoqda
+        if d.get("rank") and d.get("page_number"):
+            counting_msg = await update.message.reply_text(
+                "\u23f3 Jami abituriyentlar soni hisoblanmoqda..."
+            )
+
+            total = await asyncio.to_thread(
+                get_total_count,
+                d["page_number"], d["page_size"],
+                d.get("s4subject"), d.get("s5subject"), d.get("ed_lang_id"),
+            )
+
+            if total:
+                pct = round(d["rank"] / total * 100, 1)
+                await counting_msg.edit_text(
+                    f"\U0001f4ca Jami *{total}* ta abituriyent ichida "
+                    f"*{d['rank']}*-o'rin (top *{pct}%*)",
+                    parse_mode="Markdown",
+                )
+            else:
+                await counting_msg.delete()
+
     elif result["status"] == "not_found":
         await update.message.reply_text(
             "\u274c Ushbu ID bo'yicha ma'lumot topilmadi.\n"
