@@ -45,7 +45,13 @@ def _get_sheet() -> gspread.Worksheet:
 
 
 def _all_records() -> list[dict]:
-    return _get_sheet().get_all_records(expected_headers=HEADERS)
+    ws = _get_sheet()
+    # Sarlavha qatorini tekshiramiz
+    actual_headers = ws.row_values(1)
+    if actual_headers != HEADERS:
+        print(f"[HEADERS] Kutilgan: {HEADERS}")
+        print(f"[HEADERS] Sheets da: {actual_headers}")
+    return ws.get_all_records()
 
 
 def _row_num(records: list[dict], uid: str):
