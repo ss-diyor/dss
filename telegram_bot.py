@@ -308,6 +308,16 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from telegram.error import Conflict
+    if isinstance(context.error, Conflict):
+        print("[CONFLICT] Boshqa bot instance ishlayapti — bu instance to'xtatildi.")
+        # Conflict bo'lsa applicationni o'chiramiz
+        await context.application.stop()
+        return
+    print(f"[Xato] {context.error}")
+
+
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
@@ -315,8 +325,13 @@ def main() -> None:
     application.add_handler(CommandHandler("stats", admin_stats))
     application.add_handler(CommandHandler("users", admin_users))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_error_handler(error_handler)
     print("Bot ishga tushdi...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        close_loop=False,
+    )
 
 
 if __name__ == "__main__":
