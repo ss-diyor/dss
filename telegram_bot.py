@@ -309,12 +309,11 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ── main ──────────────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    import os
     from telegram.error import Conflict
     if isinstance(context.error, Conflict):
-        print("[CONFLICT] Boshqa bot instance ishlayapti — bu instance to'xtatildi.")
-        # Conflict bo'lsa applicationni o'chiramiz
-        await context.application.stop()
-        return
+        print("[CONFLICT] Boshqa bot instance ishlayapti — process to'xtatildi.")
+        os._exit(1)
     print(f"[Xato] {context.error}")
 
 
