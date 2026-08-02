@@ -202,21 +202,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("\U0001f50d Qidirilmoqda... iltimos kuting.")
 
     result = get_student_data(user_input)
+    print(f"[scraper] status={result['status']}")
 
     if result["status"] == "success":
-        await update.message.reply_text(
-            "\u2705 *Natija topildi:*\n\n" + format_result(result["data"]),
-            parse_mode="Markdown",
-        )
+        try:
+            await update.message.reply_text(
+                "\u2705 *Natija topildi:*\n\n" + format_result(result["data"]),
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            print(f"[format xato] {e}")
+            d = result["data"]
+            await update.message.reply_text(
+                f"✅ Natija topildi:\n\n"
+                f"👤 {d.get('name')}\n"
+                f"🔢 ID: {d.get('id')}\n"
+                f"📊 Ball: {d.get('score')}\n"
+                f"📌 Holat: {d.get('pass_status')}\n"
+                f"🏆 O'rin: {d.get('rank')}"
+            )
     elif result["status"] == "not_found":
         await update.message.reply_text(
             "\u274c Ushbu ID bo'yicha ma'lumot topilmadi.\n"
             "ID raqam to'g'ri ekanligini tekshiring."
         )
     else:
+        print(f"[scraper xato] {result.get('message')}")
         await update.message.reply_text(
-            f"\u26a0\ufe0f Xatolik yuz berdi:\n`{result['message']}`",
-            parse_mode="Markdown",
+            f"\u26a0\ufe0f Xatolik yuz berdi:\n{result['message']}"
         )
 
 # ── Admin handlers ────────────────────────────────────────────────────────────
