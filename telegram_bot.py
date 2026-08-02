@@ -176,7 +176,7 @@ def format_result(d: dict) -> str:
 
 # ── Guruh bildirishnomasi ─────────────────────────────────────────────────────
 
-async def _notify_group(bot, user, queried_id: str) -> None:
+async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
     """Muvaffaqiyatli so'rovdan keyin log guruhiga xabar yuboradi."""
     if not LOG_GROUP_ID:
         return
@@ -186,13 +186,38 @@ async def _notify_group(bot, user, queried_id: str) -> None:
         full_name = (first + " " + last).strip() or "Noma'lum"
         username  = f"@{user.username}" if user.username else "yo'q"
         now       = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y %H:%M")
+
+        # Abituriyent ma'lumotlari
+        student_name = _he(str(data.get("name") or "—"))
+        score        = _he(str(data.get("score") or "—"))
+        pass_status  = _he(str(data.get("pass_status") or "—"))
+        status_emoji = "✅" if data.get("is_pass") else "❌"
+
+        subjects = []
+        if data.get("s4subject"): subjects.append(_he(str(data["s4subject"])))
+        if data.get("s5subject"): subjects.append(_he(str(data["s5subject"])))
+        subjects_str = " | ".join(subjects) if subjects else "—"
+
+        rank_str = ""
+        if data.get("rank"):
+            rank_str = f"\n🏆 O'rin: <b>{data['rank']}-o'rin</b>"
+
+        natija = (
+            f"👤 Abituriyent: {student_name}\n"
+            f"📊 Ball: <b>{score}</b>\n"
+            f"📌 Holat: <b>{pass_status}</b> {status_emoji}\n"
+            f"📚 Fanlar: {subjects_str}"
+            f"{rank_str}"
+        )
         text = (
             "🔔 <b>Yangi so'rov</b>\n\n"
             f"👤 Ism: {_he(full_name)}\n"
             f"🆔 Telegram ID: <code>{user.id}</code>\n"
             f"📱 Username: {_he(username)}\n"
             f"🔍 Qidirgan ID: <code>{_he(queried_id)}</code>\n"
-            f"🕐 Vaqt: {now}"
+            f"🕐 Vaqt: {now}\n"
+            f"\n— <b>Natija</b> —\n"
+            f"<tg-spoiler>{natija}</tg-spoiler>"
         )
         await bot.send_message(chat_id=int(LOG_GROUP_ID), text=text, parse_mode="HTML")
     except Exception as e:
@@ -260,7 +285,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
         # Guruhga bildirishnoma — background task, foydalanuvchi kutmaydi
-        asyncio.create_task(_notify_group(context.bot, update.effective_user, user_input))
+        asyncio.create_task(_notify_group(context.bot, update.effective_user, user_input, d))
 
         # 2-xabar: jami hisoblanmoqda
         if d.get("rank") and d.get("page_number"):
