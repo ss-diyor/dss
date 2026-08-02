@@ -1,10 +1,19 @@
 import re
+import time
 import requests
 from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 
-BASE_URL = "https://mandat.uzbmb.uz"
-HEADERS  = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+BASE_URL  = "https://mandat.uzbmb.uz"
+HEADERS   = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+CACHE_TTL = 1800  # 30 daqiqa
+
+# TCP ulanishni qayta ishlatish uchun Session
+_session = requests.Session()
+_session.headers.update(HEADERS)
+
+# total_count cache: {(s4, s5, edlang): (total, timestamp)}
+_total_cache: dict = {}
 
 
 def clean_id(text):
@@ -22,10 +31,7 @@ def _paginate_params(page_number, page_size, s4subject, s5subject, ed_lang_id):
 def _page_has_content(page_num, page_size, s4subject, s5subject, ed_lang_id):
     try:
         params = _paginate_params(page_num, page_size, s4subject, s5subject, ed_lang_id)
-        resp = requests.get(
-            f"{BASE_URL}/Bakalavr/Paginate",
-            params=params, headers=HEADERS, timeout=15,
-        )
+        resp = _session.get(f"{BASE_URL}/Bakalavr/Paginate", params=params, timeout=15)
         if resp.status_code != 200:
             return False
         soup = BeautifulSoup(resp.text, 'html.parser')
@@ -35,42 +41,34 @@ def _page_has_content(page_num, page_size, s4subject, s5subject, ed_lang_id):
 
 
 def _find_true_last_page(current_page, page_size, s4subject, s5subject, ed_lang_id):
-    """Binary search orqali haqiqiy oxirgi sahifani topadi."""
     def has(n):
         return _page_has_content(n, page_size, s4subject, s5subject, ed_lang_id)
 
-    # 1. Eksponent o'sish: yuqori chegara topish
-    low  = current_page
-    step = 1
+    low, step = current_page, 1
     high = current_page + step
     while has(high):
         low   = high
         step *= 2
         high  = low + step
         if high > 500_000:
-            return current_page  # fallback
+            return current_page
 
-    # 2. Binary search
     while low < high - 1:
         mid = (low + high) // 2
         if has(mid):
             low = mid
         else:
             high = mid
-
     return low
 
 
 def _count_cards_on_page(page_num, page_size, s4subject, s5subject, ed_lang_id):
     try:
         params = _paginate_params(page_num, page_size, s4subject, s5subject, ed_lang_id)
-        resp = requests.get(
-            f"{BASE_URL}/Bakalavr/Paginate",
-            params=params, headers=HEADERS, timeout=15,
-        )
+        resp = _session.get(f"{BASE_URL}/Bakalavr/Paginate", params=params, timeout=15)
         if resp.status_code != 200:
             return page_size
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        soup  = BeautifulSoup(resp.text, 'html.parser')
         count = len(soup.find_all('div', class_='m3-rescard'))
         return count if count > 0 else page_size
     except Exception:
@@ -79,27 +77,35 @@ def _count_cards_on_page(page_num, page_size, s4subject, s5subject, ed_lang_id):
 
 def get_total_count(page_number, page_size, s4subject, s5subject, ed_lang_id):
     """
-    Binary search orqali jami abituriyentlar sonini hisoblaydi.
-    Bu funksiya alohida chaqiriladi — natijadan keyin.
+    Jami abituriyentlar sonini qaytaradi.
+    Natija 30 daqiqa cache da saqlanadi — bir yo'nalish bir marta hisoblanadi.
     """
+    cache_key = (s4subject, s5subject, ed_lang_id)
+    now       = time.time()
+
+    # Cache da bor va muddati o'tmagan bo'lsa
+    if cache_key in _total_cache:
+        total, ts = _total_cache[cache_key]
+        if now - ts < CACHE_TTL:
+            return total
+
+    # Yangi hisoblash
     try:
         last_page  = _find_true_last_page(page_number, page_size, s4subject, s5subject, ed_lang_id)
         cards_last = _count_cards_on_page(last_page, page_size, s4subject, s5subject, ed_lang_id)
-        return (last_page - 1) * page_size + cards_last
+        total      = (last_page - 1) * page_size + cards_last
+        _total_cache[cache_key] = (total, now)
+        return total
     except Exception:
         return None
 
 
 def get_student_data(entrant_id):
-    """
-    Abituriyent ma'lumotlarini qaytaradi.
-    total_count bu yerda hisoblanmaydi — get_total_count() alohida chaqiriladi.
-    """
     url    = f"{BASE_URL}/Bakalavr/MainSearch"
     params = {"entrantid": entrant_id, "lang": "uz"}
 
     try:
-        response = requests.get(url, params=params, headers=HEADERS, timeout=30)
+        response = _session.get(url, params=params, timeout=30)
         if response.status_code != 200:
             return {"status": "error", "message": f"Saytga bog'lanib bo'lmadi: {response.status_code}"}
 
