@@ -88,7 +88,6 @@ def record_user(user, query: bool = False) -> None:
             if query:
                 count += 1
             sheet.update(
-                f"B{row}:G{row}",
                 [[
                     user.first_name or "",
                     user.last_name  or "",
@@ -96,7 +95,8 @@ def record_user(user, query: bool = False) -> None:
                     existing.get("first_seen", now),
                     now,
                     count,
-                ]]
+                ]],
+                f"B{row}:G{row}",
             )
     except Exception as e:
         print(f"[record_user xato] {e}")
@@ -205,22 +205,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     print(f"[scraper] status={result['status']}")
 
     if result["status"] == "success":
-        try:
-            await update.message.reply_text(
-                "\u2705 *Natija topildi:*\n\n" + format_result(result["data"]),
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            print(f"[format xato] {e}")
-            d = result["data"]
-            await update.message.reply_text(
-                f"✅ Natija topildi:\n\n"
-                f"👤 {d.get('name')}\n"
-                f"🔢 ID: {d.get('id')}\n"
-                f"📊 Ball: {d.get('score')}\n"
-                f"📌 Holat: {d.get('pass_status')}\n"
-                f"🏆 O'rin: {d.get('rank')}"
-            )
+        await update.message.reply_text(
+            "\u2705 *Natija topildi:*\n\n" + format_result(result["data"]),
+            parse_mode="Markdown",
+        )
     elif result["status"] == "not_found":
         await update.message.reply_text(
             "\u274c Ushbu ID bo'yicha ma'lumot topilmadi.\n"
