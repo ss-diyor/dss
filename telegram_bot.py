@@ -74,7 +74,7 @@ def _he(text) -> str:
 def record_user(user, query: bool = False) -> None:
     try:
         uid = str(user.id)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d %H:%M:%S")
         sheet = _get_sheet()
         records = _all_records()
         row = _row_num(records, uid)
