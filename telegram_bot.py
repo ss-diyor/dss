@@ -148,13 +148,23 @@ def format_result(d: dict) -> str:
         f"\U0001f4cc Holat: *{escape_md(str(d.get('pass_status') or ''))}* {status_emoji}",
     ]
     if d.get("rank"):
-        if d.get("page_link"):
+        rank        = d["rank"]
+        total       = d.get("total_count")
+        page_link   = d.get("page_link")
+
+        if total:
+            pct      = round(rank / total * 100, 1)
+            rank_str = f"*{rank}-o'rin* (jami {total} ta abituriyent ichida) — top {pct}%"
+        else:
+            rank_str = f"*{rank}-o'rin*"
+
+        if page_link:
             lines.append(
-                f"\U0001f3c6 Umumiy o'rin: *{d['rank']}-o'rin*"
-                f" \u2014 [Saytda ko'rish]({d['page_link']})"
+                f"\U0001f3c6 Reytingda: {rank_str}"
+                f" \u2014 [Saytda ko'rish]({page_link})"
             )
         else:
-            lines.append(f"\U0001f3c6 Umumiy o'rin: *{d['rank']}-o'rin*")
+            lines.append(f"\U0001f3c6 Reytingda: {rank_str}")
     subjects = []
     if d.get("s4subject"): subjects.append(escape_md(str(d["s4subject"])))
     if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
