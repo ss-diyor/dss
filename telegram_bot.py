@@ -23,12 +23,6 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
 
 USERS_PER_PAGE = 20
 
-def escape_md(text: str) -> str:
-    """Markdown V1 uchun maxsus belgilarni escape qiladi."""
-    for ch in ['_', '*', '`', '[']:
-        text = text.replace(ch, '\\' + ch)
-    return text
-
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
 _sheet = None
@@ -220,8 +214,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # ── Admin handlers ────────────────────────────────────────────────────────────
 
+async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    await update.message.reply_text(
+        f"Sizning ID: `{uid}`\n"
+        f"ADMIN\\_ID: `{ADMIN_ID}`\n"
+        f"Admin: *{'Ha ✅' if uid == ADMIN_ID else \"Yo'q ❌\"}*",
+        parse_mode="Markdown",
+    )
+
+
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user.id != ADMIN_ID:
+    uid = update.effective_user.id
+    print(f"[/stats] user_id={uid}, ADMIN_ID={ADMIN_ID}, match={uid == ADMIN_ID}")
+    if uid != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
 
@@ -285,8 +291,8 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     for i, u in enumerate(users_slice, start=start_num):
         first  = u.get("first_name", "") or ""
         last_n = u.get("last_name",  "") or ""
-        full_name    = escape_md((first + " " + last_n).strip() or "Noma'lum")
-        username_str = escape_md(u.get("username") or "username yo'q")
+        full_name    = (first + " " + last_n).strip() or "Noma'lum"
+        username_str = u.get("username") or "username yo'q"
         count        = int(u.get("query_count") or 0)
 
         raw_last = u.get("last_seen", "")
@@ -315,18 +321,19 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ── main ──────────────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    import os as _os
+    import os
     from telegram.error import Conflict
     if isinstance(context.error, Conflict):
         print("[CONFLICT] Boshqa bot instance ishlayapti — process to'xtatildi.")
-        _os._exit(1)
-    print(f"[Xato] {type(context.error).__name__}: {context.error}")
+        os._exit(1)
+    print(f"[Xato] {context.error}")
 
 
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help",  help_command))
+    application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("stats", admin_stats))
     application.add_handler(CommandHandler("users", admin_users))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
