@@ -45,13 +45,7 @@ def _get_sheet() -> gspread.Worksheet:
 
 
 def _all_records() -> list[dict]:
-    ws = _get_sheet()
-    # Sarlavha qatorini tekshiramiz
-    actual_headers = ws.row_values(1)
-    if actual_headers != HEADERS:
-        print(f"[HEADERS] Kutilgan: {HEADERS}")
-        print(f"[HEADERS] Sheets da: {actual_headers}")
-    return ws.get_all_records()
+    return _get_sheet().get_all_records()
 
 
 def _row_num(records: list[dict], uid: str):
@@ -101,7 +95,8 @@ def record_user(user, query: bool = False) -> None:
             if query:
                 count += 1
             sheet.update(
-                [[
+                range_name=f"B{row}:G{row}",
+                values=[[
                     user.first_name or "",
                     user.last_name  or "",
                     ("@" + user.username) if user.username else "",
@@ -109,7 +104,6 @@ def record_user(user, query: bool = False) -> None:
                     now,
                     count,
                 ]],
-                f"B{row}:G{row}",
             )
     except Exception as e:
         print(f"[record_user xato] {e}")
@@ -340,6 +334,97 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+
+async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("\u26d4 Ruxsat yo'q.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "\U0001f4e2 *Broadcast foydalanish:*\n"
+            "`/broadcast <xabar matni>`\n\n"
+            "Markdown qo'llab-quvvatlanadi:\n"
+            "`*qalin*`  `_kursiv_`  `` `kod` ``",
+            parse_mode="Markdown",
+        )
+        return
+
+    # context.args newline yo'qotadi, raw text dan olamiz
+    raw = update.message.text or ""
+    text = raw.split(None, 1)[1] if " " in raw or "\n" in raw else ""
+
+    try:
+        records = await asyncio.to_thread(_all_records)
+    except Exception as e:
+        await update.message.reply_text(f"\u274c Sheets xatosi:\n`{e}`", parse_mode="Markdown")
+        return
+
+    user_ids = [str(r.get("user_id")) for r in records if r.get("user_id")]
+
+    if not user_ids:
+        await update.message.reply_text("Hali foydalanuvchilar yo'q.")
+        return
+
+    total = len(user_ids)
+    status_msg = await update.message.reply_text(f"\U0001f4e4 Yuborilmoqda... 0/{total}")
+
+    success, blocked, failed = 0, [], []
+
+    for i, uid in enumerate(user_ids, 1):
+        try:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(uid),
+                    text=text,
+                    parse_mode="Markdown",
+                )
+            except Exception as md_err:
+                if "can't parse" in str(md_err).lower():
+                    # Markdown xatosi — plain text sifatida qayta urinib ko'ramiz
+                    await context.bot.send_message(chat_id=int(uid), text=text)
+                else:
+                    raise
+            success += 1
+        except Exception as e:
+            err = str(e).lower()
+            if any(k in err for k in ("forbidden", "blocked", "deactivated", "kicked", "not found")):
+                blocked.append(uid)
+            else:
+                failed.append(uid)
+
+        # Progress har 10 tadan
+        if i % 10 == 0 or i == total:
+            try:
+                await status_msg.edit_text(f"\U0001f4e4 Yuborilmoqda... {i}/{total}")
+            except Exception:
+                pass
+
+        await asyncio.sleep(1)  # 1 xabar/sekund — xavfsiz tezlik
+
+    # ── Yakuniy hisobot ────────────────────────────────────────────────────────
+    lines = ["\U0001f4e2 *Broadcast yakunlandi*\n",
+             f"\u2705 Muvaffaqiyatli: *{success}* ta"]
+
+    if blocked:
+        lines.append(f"\U0001f6ab Bot blok qilgan: *{len(blocked)}* ta")
+        preview = ", ".join(f"`{u}`" for u in blocked[:20])
+        if len(blocked) > 20:
+            preview += f" ... va yana {len(blocked) - 20} ta"
+        lines.append(f"   {preview}")
+
+    if failed:
+        lines.append(f"\u26a0\ufe0f Boshqa xato: *{len(failed)}* ta")
+        preview = ", ".join(f"`{u}`" for u in failed[:10])
+        if len(failed) > 10:
+            preview += f" ... va yana {len(failed) - 10} ta"
+        lines.append(f"   {preview}")
+
+    try:
+        await status_msg.edit_text("\n".join(lines), parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -358,6 +443,7 @@ def main() -> None:
     application.add_handler(CommandHandler("whoami", whoami))
     application.add_handler(CommandHandler("stats", admin_stats))
     application.add_handler(CommandHandler("users", admin_users))
+    application.add_handler(CommandHandler("broadcast", admin_broadcast))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
     print("Bot ishga tushdi...")
