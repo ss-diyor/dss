@@ -1,3 +1,5 @@
 requests
 beautifulsoup4
 python-telegram-bot
+gspread
+google-auth
