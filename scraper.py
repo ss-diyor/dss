@@ -8,55 +8,93 @@ HEADERS  = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit
 
 
 def clean_id(text):
-    """Faqat raqamlarni qoldiradi."""
     return re.sub(r'\D', '', text)
 
 
 def _paginate_params(page_number, page_size, s4subject, s5subject, ed_lang_id):
     p = {'pageNumber': page_number, 'pageSize': page_size, 'lang': 'uz'}
-    if s4subject: p['s4subject'] = s4subject
-    if s5subject: p['s5subject'] = s5subject
-    if ed_lang_id: p['edLangId'] = ed_lang_id
+    if s4subject:  p['s4subject'] = s4subject
+    if s5subject:  p['s5subject'] = s5subject
+    if ed_lang_id: p['edLangId']  = ed_lang_id
     return p
 
 
-def _get_last_page(soup, current_page):
-    """Paginatsiyadagi barcha sahifa raqamlaridan maksimalini topadi."""
-    last = current_page or 1
-    for item in soup.find_all('li', class_='page-item'):
-        p_input = item.find('input', {'name': 'pageNumber'})
-        if p_input:
-            try:
-                pn = int(p_input['value'])
-                if pn > last:
-                    last = pn
-            except (ValueError, TypeError):
-                pass
-    return last
-
-
-def _fetch_total_count(last_page, page_size, s4subject, s5subject, ed_lang_id):
-    """Oxirgi sahifani yuklab aniq jami abituriyentlar sonini hisoblaydi."""
+def _page_has_content(page_num, page_size, s4subject, s5subject, ed_lang_id):
     try:
-        params = _paginate_params(last_page, page_size, s4subject, s5subject, ed_lang_id)
+        params = _paginate_params(page_num, page_size, s4subject, s5subject, ed_lang_id)
         resp = requests.get(
             f"{BASE_URL}/Bakalavr/Paginate",
-            params=params,
-            headers=HEADERS,
-            timeout=30,
+            params=params, headers=HEADERS, timeout=15,
         )
         if resp.status_code != 200:
-            return last_page * page_size  # taxminiy
+            return False
         soup = BeautifulSoup(resp.text, 'html.parser')
-        cards_on_last = len(soup.find_all('div', class_='m3-rescard'))
-        if cards_on_last == 0:
-            return last_page * page_size  # fallback
-        return (last_page - 1) * page_size + cards_on_last
+        return bool(soup.find('div', class_='m3-rescard'))
     except Exception:
-        return last_page * page_size  # xato bo'lsa taxminiy qaytaramiz
+        return False
+
+
+def _find_true_last_page(current_page, page_size, s4subject, s5subject, ed_lang_id):
+    """Binary search orqali haqiqiy oxirgi sahifani topadi."""
+    def has(n):
+        return _page_has_content(n, page_size, s4subject, s5subject, ed_lang_id)
+
+    # 1. Eksponent o'sish: yuqori chegara topish
+    low  = current_page
+    step = 1
+    high = current_page + step
+    while has(high):
+        low   = high
+        step *= 2
+        high  = low + step
+        if high > 500_000:
+            return current_page  # fallback
+
+    # 2. Binary search
+    while low < high - 1:
+        mid = (low + high) // 2
+        if has(mid):
+            low = mid
+        else:
+            high = mid
+
+    return low
+
+
+def _count_cards_on_page(page_num, page_size, s4subject, s5subject, ed_lang_id):
+    try:
+        params = _paginate_params(page_num, page_size, s4subject, s5subject, ed_lang_id)
+        resp = requests.get(
+            f"{BASE_URL}/Bakalavr/Paginate",
+            params=params, headers=HEADERS, timeout=15,
+        )
+        if resp.status_code != 200:
+            return page_size
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        count = len(soup.find_all('div', class_='m3-rescard'))
+        return count if count > 0 else page_size
+    except Exception:
+        return page_size
+
+
+def get_total_count(page_number, page_size, s4subject, s5subject, ed_lang_id):
+    """
+    Binary search orqali jami abituriyentlar sonini hisoblaydi.
+    Bu funksiya alohida chaqiriladi — natijadan keyin.
+    """
+    try:
+        last_page  = _find_true_last_page(page_number, page_size, s4subject, s5subject, ed_lang_id)
+        cards_last = _count_cards_on_page(last_page, page_size, s4subject, s5subject, ed_lang_id)
+        return (last_page - 1) * page_size + cards_last
+    except Exception:
+        return None
 
 
 def get_student_data(entrant_id):
+    """
+    Abituriyent ma'lumotlarini qaytaradi.
+    total_count bu yerda hisoblanmaydi — get_total_count() alohida chaqiriladi.
+    """
     url    = f"{BASE_URL}/Bakalavr/MainSearch"
     params = {"entrantid": entrant_id, "lang": "uz"}
 
@@ -71,7 +109,6 @@ def get_student_data(entrant_id):
         if not all_cards:
             return {"status": "not_found", "message": "Ma'lumot topilmadi"}
 
-        # Faol sahifa raqami va hajmi
         page_number, page_size = None, 10
         active_item = soup.find('li', class_='page-item active')
         if active_item:
@@ -80,7 +117,6 @@ def get_student_data(entrant_id):
             if p_inp: page_number = int(p_inp['value'])
             if s_inp: page_size   = int(s_inp['value'])
 
-        # Fanlar va til parametrlari
         s4subject, s5subject, ed_lang_id = None, None, None
         first_form = soup.find('form', action='/Bakalavr/Paginate')
         if first_form:
@@ -91,7 +127,6 @@ def get_student_data(entrant_id):
             if s5: s5subject  = s5['value']
             if ed: ed_lang_id = ed['value']
 
-        # Sahifa linki
         page_link = None
         if page_number:
             page_link = (
@@ -99,7 +134,6 @@ def get_student_data(entrant_id):
                 + urlencode(_paginate_params(page_number, page_size, s4subject, s5subject, ed_lang_id))
             )
 
-        # O'quvchini qidirish
         target_id = clean_id(str(entrant_id))
 
         for idx, card in enumerate(all_cards):
@@ -117,14 +151,6 @@ def get_student_data(entrant_id):
             score     = score_tag.text.strip() if score_tag else "Noma'lum"
             is_pass   = 'm3-rescard--pass' in card.get('class', [])
 
-            # Jami abituriyentlar soni (oxirgi sahifaga qo'shimcha so'rov)
-            total_count = None
-            if page_number:
-                last_page   = _get_last_page(soup, page_number)
-                total_count = _fetch_total_count(
-                    last_page, page_size, s4subject, s5subject, ed_lang_id
-                )
-
             return {
                 "status": "success",
                 "data": {
@@ -134,9 +160,11 @@ def get_student_data(entrant_id):
                     "pass_status": "O'tdi" if is_pass else "O'tmadi",
                     "is_pass":     is_pass,
                     "rank":        rank,
-                    "total_count": total_count,
+                    "page_number": page_number,
+                    "page_size":   page_size,
                     "s4subject":   s4subject,
                     "s5subject":   s5subject,
+                    "ed_lang_id":  ed_lang_id,
                     "page_link":   page_link,
                 }
             }
@@ -145,18 +173,3 @@ def get_student_data(entrant_id):
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-
-if __name__ == "__main__":
-    test_id = input("ID kiriting: ").strip()
-    result  = get_student_data(test_id)
-    if result["status"] == "success":
-        d = result["data"]
-        print(f"Ism         : {d['name']}")
-        print(f"ID          : {d['id']}")
-        print(f"Ball        : {d['score']}")
-        print(f"Holat       : {d['pass_status']}")
-        print(f"O'rin       : {d['rank']} / {d['total_count']}")
-        print(f"Fanlar      : {d['s4subject']} | {d['s5subject']}")
-    else:
-        print(result)
