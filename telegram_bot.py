@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from datetime import datetime
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import gspread
 from google.oauth2.service_account import Credentials
@@ -10,30 +10,25 @@ from scraper import get_student_data
 
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-
-# Google Sheets sozlamalari
-# GOOGLE_CREDENTIALS_JSON — service account JSON (butun matn, bir qatorda)
-# SHEET_ID               — spreadsheet URL dagi uzun ID
-SHEET_ID               = os.getenv("SHEET_ID", "")
+SHEET_ID = os.getenv("SHEET_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 
 SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
-HEADERS = ["user_id", "first_name", "last_name", "username",
-           "first_seen", "last_seen", "query_count"]
 
-USERS_PER_PAGE = 20
+# Yangi 11 ustunli format
+HEADERS = [
+    "user_id", "tg_first_name", "tg_last_name", "username", "phone",
+    "first_seen", "last_seen", "query_count",
+    "last_query_id", "last_student_name", "last_subjects",
+]
 
-def _he(text: str) -> str:
-    """HTML uchun < > & belgilarini escape qilish."""
-    return (text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;"))
+USERS_PER_PAGE = 5   # har biri ko'p qator egallaydi
 
 
-# ── Sheets ulanishi ────────────────────────────────────────────────────────────
+# ── Google Sheets ─────────────────────────────────────────────────────────────
 
 _sheet = None
+
 
 def _get_sheet() -> gspread.Worksheet:
     global _sheet
@@ -42,12 +37,11 @@ def _get_sheet() -> gspread.Worksheet:
     creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
     creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
     client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(SHEET_ID)
-    ws = spreadsheet.sheet1
-    # Sarlavha qatori yo'q bo'lsa qo'shamiz
+    ws = client.open_by_key(SHEET_ID).sheet1
+    # Sarlavha qatorini tekshirib yangilaymiz (eski 7 ustundan yangi 11 ga)
     first_row = ws.row_values(1)
     if first_row != HEADERS:
-        ws.insert_row(HEADERS, 1)
+        ws.update(range_name="A1", values=[HEADERS])
     _sheet = ws
     return _sheet
 
@@ -56,71 +50,102 @@ def _all_records() -> list[dict]:
     return _get_sheet().get_all_records()
 
 
-def _row_num(records: list[dict], uid: str):
-    """Foydalanuvchi qaysi qatorda ekanini topa olsa qaytaradi (2-indexed), aks holda None."""
+def _find_row(records: list[dict], uid: str):
     for i, rec in enumerate(records):
         if str(rec.get("user_id")) == uid:
-            return i + 2   # 1 — header, 1 — 0-index farq
+            return i + 2  # +1 header, +1 0-index
     return None
+
+
+def _he(text) -> str:
+    """HTML uchun xavfli belgilarni escape qilish."""
+    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 # ── Ma'lumot funksiyalari ──────────────────────────────────────────────────────
 
-def record_user(user, query: bool = False) -> None:
+def record_user(user, query_data: dict | None = None) -> None:
+    """
+    query_data = {"id": "1234567", "name": "Ism Familiya", "subjects": "Fan1 + Fan2"}
+    """
     try:
-        uid = str(user.id)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        sheet = _get_sheet()
+        uid  = str(user.id)
+        now  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        uname = ("@" + user.username) if user.username else ""
+        sheet   = _get_sheet()
         records = _all_records()
-        row = _row_num(records, uid)
+        row     = _find_row(records, uid)
 
         if row is None:
-            # Yangi foydalanuvchi — qo'shamiz
             sheet.append_row([
                 uid,
                 user.first_name or "",
                 user.last_name  or "",
-                ("@" + user.username) if user.username else "",
+                uname, "",           # phone bo'sh
                 now, now,
-                1 if query else 0,
+                1 if query_data else 0,
+                query_data["id"]       if query_data else "",
+                query_data["name"]     if query_data else "",
+                query_data["subjects"] if query_data else "",
             ])
         else:
-            # Mavjud foydalanuvchi — B:G ustunlarini yangilaymiz
-            existing = {str(r.get("user_id")): r for r in records}[uid]
-            count = int(existing.get("query_count") or 0)
-            if query:
-                count += 1
+            ex    = next(r for r in records if str(r.get("user_id")) == uid)
+            count = int(ex.get("query_count") or 0) + (1 if query_data else 0)
             sheet.update(
-                range_name=f"B{row}:G{row}",
+                range_name=f"B{row}:K{row}",
                 values=[[
                     user.first_name or "",
                     user.last_name  or "",
-                    ("@" + user.username) if user.username else "",
-                    existing.get("first_seen", now),
+                    uname,
+                    ex.get("phone", ""),
+                    ex.get("first_seen", now),
                     now,
                     count,
+                    query_data["id"]       if query_data else ex.get("last_query_id", ""),
+                    query_data["name"]     if query_data else ex.get("last_student_name", ""),
+                    query_data["subjects"] if query_data else ex.get("last_subjects", ""),
                 ]]
             )
     except Exception as e:
         print(f"[record_user xato] {e}")
 
 
+def save_phone(user, phone: str) -> None:
+    try:
+        uid     = str(user.id)
+        now     = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sheet   = _get_sheet()
+        records = _all_records()
+        row     = _find_row(records, uid)
+        if row:
+            sheet.update(range_name=f"E{row}", values=[[phone]])
+        else:
+            sheet.append_row([
+                uid,
+                user.first_name or "",
+                user.last_name  or "",
+                ("@" + user.username) if user.username else "",
+                phone,
+                now, now, 0, "", "", "",
+            ])
+    except Exception as e:
+        print(f"[save_phone xato] {e}")
+
+
 def get_stats() -> dict:
     try:
-        records = _all_records()
+        records       = _all_records()
         total_users   = len(records)
         total_queries = sum(int(r.get("query_count") or 0) for r in records)
-
-        last_seen = ""
+        last_seen     = ""
         if records:
             latest = max(records, key=lambda r: r.get("last_seen", ""))
-            raw = latest.get("last_seen", "")
+            raw    = latest.get("last_seen", "")
             if raw:
                 try:
-                    dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
-                    last_seen = dt.strftime("%d.%m.%Y %H:%M")
+                    last_seen = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y %H:%M")
                 except ValueError:
                     last_seen = raw
-
         return {"total_users": total_users, "total_queries": total_queries, "last_seen": last_seen}
     except Exception as e:
         print(f"[get_stats xato] {e}")
@@ -129,15 +154,14 @@ def get_stats() -> dict:
 
 def get_users_page(page: int) -> tuple[list, int]:
     try:
-        records = _all_records()
-        sorted_records = sorted(records, key=lambda r: r.get("first_seen", ""))
-        total = len(sorted_records)
-        start = (page - 1) * USERS_PER_PAGE
-        end   = start + USERS_PER_PAGE
-        return sorted_records[start:end], total
+        records = sorted(_all_records(), key=lambda r: r.get("first_seen", ""))
+        total   = len(records)
+        start   = (page - 1) * USERS_PER_PAGE
+        return records[start : start + USERS_PER_PAGE], total
     except Exception as e:
         print(f"[get_users_page xato] {e}")
         return [], 0
+
 
 # ── Formatlash ────────────────────────────────────────────────────────────────
 
@@ -164,7 +188,38 @@ def format_result(d: dict) -> str:
         lines.append(f"\U0001f4da Fanlar: {' | '.join(subjects)}")
     return "\n".join(lines)
 
+
+def format_user_entry(u: dict) -> str:
+    last_id      = _he(u.get("last_query_id", ""))    or "\u2014"
+    student_name = _he(u.get("last_student_name", "")) or "\u2014"
+    subjects     = _he(u.get("last_subjects", ""))     or "\u2014"
+    username     = _he(u.get("username", ""))           or "yo'q"
+    phone        = _he(u.get("phone", ""))              or "ulashilmagan"
+
+    raw_last = u.get("last_seen", "")
+    try:
+        last_time = datetime.strptime(raw_last, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y %H:%M")
+    except (ValueError, TypeError):
+        last_time = "\u2014"
+
+    return (
+        f"\U0001f194 Abituriyent qidirgan oxirgi ID: <code>{last_id}</code>\n"
+        f"\U0001f464 Ism: {student_name}\n"
+        f"\U0001f3af Yo'nalish: {subjects}\n"
+        f"\n"
+        f"\U0001f517 Telegram:\n"
+        f"\U0001f464 Username: <code>{username}</code>\n"
+        f"\U0001f4de Telefon: <code>{phone}</code>\n"
+        f"\U0001f4c5 Oxirgi so'rov vaqti: {last_time}"
+    )
+
+
 # ── Handlers ──────────────────────────────────────────────────────────────────
+
+def _contact_keyboard():
+    kb = [[KeyboardButton("\U0001f4f1 Telefon raqamni ulashish", request_contact=True)]]
+    return ReplyKeyboardMarkup(kb, one_time_keyboard=True, resize_keyboard=True)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await asyncio.to_thread(record_user, update.effective_user)
@@ -173,9 +228,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Ushbu bot orqali siz umumiy o'rningizni bilib olishingiz mumkin.\n"
         "Shunchaki 7 xonali abituriyent ID raqamini yuboring.\n\n"
         "Misol:\n`1234567`\n\n"
-        "\"Saytda ko'rish\" ni bosish orqali siz mandat.uzbmb.uz saytida "
-        "aynan qaysi sahifada ekanligingizni bilib olishingiz mumkin.",
+        "Iltimos, telefon raqamingizni ham ulashing \U0001f447",
         parse_mode="Markdown",
+        reply_markup=_contact_keyboard(),
     )
 
 
@@ -195,6 +250,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    contact = update.message.contact
+    # Faqat o'z raqamini qabul qilamiz
+    if contact.user_id != update.effective_user.id:
+        return
+    phone = contact.phone_number
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    await asyncio.to_thread(save_phone, update.effective_user, phone)
+    await update.message.reply_text(
+        "\u2705 Telefon raqam saqlandi, rahmat!",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_input = update.message.text.strip()
 
@@ -207,26 +277,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    await asyncio.to_thread(record_user, update.effective_user, True)
     await update.message.reply_text("\U0001f50d Qidirilmoqda... iltimos kuting.")
-
     result = get_student_data(user_input)
 
     if result["status"] == "success":
+        d = result["data"]
+        subj = []
+        if d.get("s4subject"): subj.append(d["s4subject"])
+        if d.get("s5subject"): subj.append(d["s5subject"])
+        query_data = {
+            "id":       user_input,
+            "name":     d.get("name", ""),
+            "subjects": " + ".join(subj),
+        }
+        await asyncio.to_thread(record_user, update.effective_user, query_data)
         await update.message.reply_text(
-            "\u2705 *Natija topildi:*\n\n" + format_result(result["data"]),
+            "\u2705 *Natija topildi:*\n\n" + format_result(d),
             parse_mode="Markdown",
         )
     elif result["status"] == "not_found":
+        await asyncio.to_thread(record_user, update.effective_user)
         await update.message.reply_text(
             "\u274c Ushbu ID bo'yicha ma'lumot topilmadi.\n"
             "ID raqam to'g'ri ekanligini tekshiring."
         )
     else:
+        await asyncio.to_thread(record_user, update.effective_user)
         await update.message.reply_text(
             f"\u26a0\ufe0f Xatolik yuz berdi:\n`{result['message']}`",
             parse_mode="Markdown",
         )
+
 
 # ── Admin handlers ────────────────────────────────────────────────────────────
 
@@ -234,8 +315,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
-
-    s = await asyncio.to_thread(get_stats)
+    s    = await asyncio.to_thread(get_stats)
     last = s["last_seen"] if s["last_seen"] else "Hali yo'q"
     await update.message.reply_text(
         "\U0001f4ca *Statistika*\n\n"
@@ -252,9 +332,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     try:
-        page = int(context.args[0]) if context.args else 1
-        if page < 1:
-            page = 1
+        page = max(1, int(context.args[0])) if context.args else 1
     except (ValueError, IndexError):
         page = 1
 
@@ -274,40 +352,27 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     start_num = (page - 1) * USERS_PER_PAGE + 1
-    lines = [
-        f"\U0001f465 <b>Foydalanuvchilar "
-        f"({start_num}-{start_num + len(users_slice) - 1} / {total}):</b>\n"
-    ]
+    end_num   = start_num + len(users_slice) - 1
 
-    for i, u in enumerate(users_slice, start=start_num):
-        first  = u.get("first_name", "") or ""
-        last_n = u.get("last_name",  "") or ""
-        full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
-        username_str = _he(u.get("username") or "username yo'q")
-        count        = int(u.get("query_count") or 0)
+    header  = (
+        f"\U0001f465 <b>Foydalanuvchilar ({start_num}\u2013{end_num} / {total})</b>"
+    )
+    SEP     = "\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
+    entries = [format_user_entry(u) for u in users_slice]
+    body    = SEP.join(entries)
 
-        raw_last = u.get("last_seen", "")
-        try:
-            dt = datetime.strptime(raw_last, "%Y-%m-%d %H:%M:%S")
-            last_date = dt.strftime("%d.%m.%Y")
-        except (ValueError, TypeError):
-            last_date = (raw_last[:10] if raw_last else "\u2014")
-
-        lines.append(
-            f"{i}. {full_name} ({username_str})"
-            f" \u2014 {count} so'rov, oxirgi: {last_date}"
-        )
-
+    footer = ""
     if total_pages > 1:
         if page < total_pages:
-            lines.append(
-                f"\n\U0001f4c4 Sahifa: {page}/{total_pages}"
-                f"  |  Keyingisi: /users {page + 1}"
-            )
+            footer = f"\n\n\U0001f4c4 Sahifa: {page}/{total_pages}  |  Keyingisi: /users {page + 1}"
         else:
-            lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}")
+            footer = f"\n\n\U0001f4c4 Sahifa: {page}/{total_pages}"
 
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await update.message.reply_text(
+        header + SEP + body + footer,
+        parse_mode="HTML",
+    )
+
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
@@ -317,6 +382,7 @@ def main() -> None:
     application.add_handler(CommandHandler("help",  help_command))
     application.add_handler(CommandHandler("stats", admin_stats))
     application.add_handler(CommandHandler("users", admin_users))
+    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("Bot ishga tushdi...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
