@@ -170,7 +170,7 @@ def format_result(d: dict) -> str:
     if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
     if subjects:
         lines.append(f"\U0001f4da Fanlar: {' | '.join(subjects)}")
-    lines.append("\n— @mandatapplicantratingbot orqali tekshirildi")
+    lines.append("\n— @mandat\_applicant\_ratingbot orqali tekshirildi")
     return "\n".join(lines)
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await counting_msg.edit_text(
                     f"\U0001f4ca Jami *{total}* ta abituriyent ichida "
                     f"*{d['rank']}*-o'rin (top *{pct}%*)\n\n"
-                    "— @mandatapplicantratingbot orqali tekshirildi",
+                    "— @mandat\_applicant\_ratingbot orqali tekshirildi",
                     parse_mode="Markdown",
                 )
             else:
