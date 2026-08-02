@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import gspread
@@ -185,7 +185,7 @@ async def _notify_group(bot, user, queried_id: str) -> None:
         last      = user.last_name  or ""
         full_name = (first + " " + last).strip() or "Noma'lum"
         username  = f"@{user.username}" if user.username else "yo'q"
-        now       = datetime.now().strftime("%d.%m.%Y %H:%M")
+        now       = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y %H:%M")
         text = (
             "🔔 <b>Yangi so'rov</b>\n\n"
             f"👤 Ism: {_he(full_name)}\n"
