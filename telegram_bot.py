@@ -23,6 +23,14 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
 
 USERS_PER_PAGE = 20
 
+def _he(text: str) -> str:
+    """HTML uchun < > & belgilarini escape qilish."""
+    return (text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
 _sheet = None
@@ -82,8 +90,8 @@ def record_user(user, query: bool = False) -> None:
             if query:
                 count += 1
             sheet.update(
-                f"B{row}:G{row}",
-                [[
+                range_name=f"B{row}:G{row}",
+                values=[[
                     user.first_name or "",
                     user.last_name  or "",
                     ("@" + user.username) if user.username else "",
@@ -267,15 +275,15 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     start_num = (page - 1) * USERS_PER_PAGE + 1
     lines = [
-        f"\U0001f465 *Foydalanuvchilar "
-        f"({start_num}-{start_num + len(users_slice) - 1} / {total}):*\n"
+        f"\U0001f465 <b>Foydalanuvchilar "
+        f"({start_num}-{start_num + len(users_slice) - 1} / {total}):</b>\n"
     ]
 
     for i, u in enumerate(users_slice, start=start_num):
         first  = u.get("first_name", "") or ""
         last_n = u.get("last_name",  "") or ""
-        full_name    = (first + " " + last_n).strip() or "Noma'lum"
-        username_str = u.get("username") or "username yo'q"
+        full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
+        username_str = _he(u.get("username") or "username yo'q")
         count        = int(u.get("query_count") or 0)
 
         raw_last = u.get("last_seen", "")
@@ -299,7 +307,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         else:
             lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
