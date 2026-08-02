@@ -27,6 +27,7 @@ USERS_PER_PAGE = 20
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
 _sheet = None
+_stats_sheet = None
 
 def _get_sheet() -> gspread.Worksheet:
     global _sheet
@@ -43,6 +44,69 @@ def _get_sheet() -> gspread.Worksheet:
         ws.update(range_name="A1", values=[HEADERS])
     _sheet = ws
     return _sheet
+
+
+def _get_stats_sheet() -> gspread.Worksheet:
+    """'Statistics' varag'ini qaytaradi, yo'q bo'lsa yaratadi."""
+    global _stats_sheet
+    if _stats_sheet is not None:
+        return _stats_sheet
+    creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(SHEET_ID)
+    try:
+        ws = spreadsheet.worksheet("Statistics")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title="Statistics", rows=10, cols=2)
+        ws.update(range_name="A1", values=[["Ko'rsatkich", "Qiymat"]])
+    _stats_sheet = ws
+    return _stats_sheet
+
+
+def update_stats_sheet() -> None:
+    """Statistics varag'ini joriy ma'lumotlar bilan yangilaydi."""
+    try:
+        records = _all_records()
+        today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
+
+        total_users   = len(records)
+        total_queries = sum(int(r.get("query_count") or 0) for r in records)
+
+        today_queries = sum(
+            int(r.get("query_count") or 0)
+            for r in records
+            if str(r.get("last_seen", "")).startswith(today)
+        )
+        today_new_users = sum(
+            1 for r in records
+            if str(r.get("first_seen", "")).startswith(today)
+        )
+
+        top = max(records, key=lambda r: int(r.get("query_count") or 0), default=None)
+        if top:
+            first  = top.get("first_name", "") or ""
+            last_n = top.get("last_name",  "") or ""
+            top_name  = (first + " " + last_n).strip() or "Noma'lum"
+            top_count = int(top.get("query_count") or 0)
+            top_str   = f"{top_name} ({top_count} ta)"
+        else:
+            top_str = "—"
+
+        ws = _get_stats_sheet()
+        ws.update(
+            range_name="A1",
+            values=[
+                ["Ko'rsatkich",              "Qiymat"],
+                ["Jami foydalanuvchilar",    total_users],
+                ["Jami so'rovlar",           total_queries],
+                ["Bugungi so'rovlar",        today_queries],
+                ["Bugungi yangi foydalanuvchilar", today_new_users],
+                ["Eng faol foydalanuvchi",   top_str],
+            ],
+        )
+    except Exception as e:
+        print(f"[update_stats_sheet xato] {e}")
 
 
 def _all_records() -> list[dict]:
@@ -108,6 +172,11 @@ def record_user(user, query: bool = False) -> None:
             )
     except Exception as e:
         print(f"[record_user xato] {e}")
+        return
+    try:
+        update_stats_sheet()
+    except Exception as e:
+        print(f"[update_stats_sheet xato] {e}")
 
 
 def get_stats() -> dict:
@@ -334,6 +403,69 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("\u26d4 Ruxsat yo'q.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "\U0001f464 *Foydalanish:*\n`/user <telegram_id>`\n\nMisol: `/user 123456789`",
+            parse_mode="Markdown",
+        )
+        return
+
+    target_uid = context.args[0].strip()
+    if not target_uid.isdigit():
+        await update.message.reply_text(
+            "\u26a0\ufe0f Telegram ID faqat raqamlardan iborat bo'lishi kerak.",
+        )
+        return
+
+    try:
+        records = await asyncio.to_thread(_all_records)
+    except Exception as e:
+        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
+        return
+
+    rec = next((r for r in records if str(r.get("user_id")) == target_uid), None)
+
+    if rec is None:
+        await update.message.reply_text(
+            f"\u274c <code>{_he(target_uid)}</code> ID li foydalanuvchi topilmadi.",
+            parse_mode="HTML",
+        )
+        return
+
+    first  = rec.get("first_name", "") or ""
+    last_n = rec.get("last_name",  "") or ""
+    full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
+    username_str = _he(rec.get("username") or "yo'q")
+    query_count  = int(rec.get("query_count") or 0)
+
+    def fmt_dt(raw):
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+            return dt.strftime("%d.%m.%Y %H:%M")
+        except (ValueError, TypeError):
+            return _he(raw) if raw else "—"
+
+    first_seen = fmt_dt(rec.get("first_seen", ""))
+    last_seen  = fmt_dt(rec.get("last_seen",  ""))
+
+    await update.message.reply_text(
+        f"\U0001f464 <b>Foydalanuvchi ma'lumotlari</b>\n\n"
+        f"\U0001f194 Telegram ID: <code>{_he(target_uid)}</code>\n"
+        f"\U0001f9d1 Ism: {full_name}\n"
+        f"\U0001f4f1 Username: {username_str}\n"
+        f"\U0001f50d Jami so'rovlar: <b>{query_count}</b> ta\n"
+        f"\U0001f4c5 Birinchi kirish: {first_seen}\n"
+        f"\U0001f550 So'nggi faollik: {last_seen}",
+        parse_mode="HTML",
+    )
+
+
+
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     print(f"[/stats] user_id={uid}, ADMIN_ID={ADMIN_ID}, match={uid == ADMIN_ID}")
@@ -535,7 +667,8 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help",  help_command))
     application.add_handler(CommandHandler("whoami", whoami))
-    application.add_handler(CommandHandler("stats", admin_stats))
+    application.add_handler(CommandHandler("user",   admin_user))
+    application.add_handler(CommandHandler("stats",  admin_stats))
     application.add_handler(CommandHandler("users", admin_users))
     application.add_handler(CommandHandler("broadcast", admin_broadcast))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
