@@ -17,7 +17,10 @@ def format_result(d: dict) -> str:
     ]
 
     if d.get("rank"):
-        lines.append(f"🏆 Umumiy o'rin: *{d['rank']}-o'rin*")
+        if d.get("page_link"):
+            lines.append(f"🏆 Umumiy o'rin: [{d['rank']}-o'rin]({d['page_link']})")
+        else:
+            lines.append(f"🏆 Umumiy o'rin: *{d['rank']}-o'rin*")
 
     subjects = []
     if d.get("s4subject"):
