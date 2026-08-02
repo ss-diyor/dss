@@ -170,6 +170,7 @@ def format_result(d: dict) -> str:
     if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
     if subjects:
         lines.append(f"\U0001f4da Fanlar: {' | '.join(subjects)}")
+    lines.append("\n— @mandat_applicant_ratingbot orqali tekshirildi")
     return "\n".join(lines)
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -178,11 +179,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
     await update.message.reply_text(
         "Assalomu alaykum, hurmatli abituriyent \U0001f44b\n\n"
-        "Ushbu bot orqali siz umumiy o'rningizni bilib olishingiz mumkin.\n"
+        "Ushbu bot orqali siz quyidagilarni bilib olishingiz mumkin:\n\n"
+        "\U0001f4ca *To'plangan ball*\n"
+        "\U0001f4cc *O'tdi yoki o'tmadi* holati\n"
+        "\U0001f3c6 *Umumiy o'rin* — tanlangan fanlar bo'yicha barcha abituriyentlar ichida\n"
+        "\U0001f465 *Jami abituriyentlar soni* va *foiz* (top %)\n"
+        "\U0001f517 *Saytda ko'rish* — mandat.uzbmb.uz da aynan qaysi sahifada ekanligingiz\n\n"
         "Shunchaki 7 xonali abituriyent ID raqamini yuboring.\n\n"
-        "Misol:\n`1234567`\n\n"
-        "\"Saytda ko'rish\" ni bosish orqali siz mandat.uzbmb.uz saytida "
-        "aynan qaysi sahifada ekanligingizni bilib olishingiz mumkin.",
+        "Misol:\n`1234567`",
         parse_mode="Markdown",
     )
 
