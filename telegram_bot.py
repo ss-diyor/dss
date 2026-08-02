@@ -39,7 +39,7 @@ def _get_sheet() -> gspread.Worksheet:
     # Sarlavha qatori yo'q bo'lsa qo'shamiz
     first_row = ws.row_values(1)
     if first_row != HEADERS:
-        ws.insert_row(HEADERS, 1)
+        ws.update(range_name="A1", values=[HEADERS])
     _sheet = ws
     return _sheet
 
@@ -60,6 +60,19 @@ def _row_num(records: list[dict], uid: str):
         if str(rec.get("user_id")) == uid:
             return i + 2   # 1 — header, 1 — 0-index farq
     return None
+
+
+def escape_md(text: str) -> str:
+    """Markdown v1 uchun maxsus belgilarni escape qilish."""
+    text = str(text or "")
+    for ch in ["\\", "*", "_", "`", "["]:
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
+def _he(text) -> str:
+    """HTML parse_mode uchun xavfli belgilarni escape qilish."""
+    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 # ── Ma'lumot funksiyalari ──────────────────────────────────────────────────────
 
@@ -293,15 +306,15 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     start_num = (page - 1) * USERS_PER_PAGE + 1
     lines = [
-        f"\U0001f465 *Foydalanuvchilar "
-        f"({start_num}-{start_num + len(users_slice) - 1} / {total}):*\n"
+        f"\U0001f465 <b>Foydalanuvchilar "
+        f"({start_num}-{start_num + len(users_slice) - 1} / {total}):</b>\n"
     ]
 
     for i, u in enumerate(users_slice, start=start_num):
         first  = u.get("first_name", "") or ""
         last_n = u.get("last_name",  "") or ""
-        full_name    = (first + " " + last_n).strip() or "Noma'lum"
-        username_str = u.get("username") or "username yo'q"
+        full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
+        username_str = _he(u.get("username") or "username yo'q")
         count        = int(u.get("query_count") or 0)
 
         raw_last = u.get("last_seen", "")
@@ -325,7 +338,7 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         else:
             lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
