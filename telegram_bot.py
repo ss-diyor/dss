@@ -216,10 +216,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
+    is_admin = "Ha ✅" if uid == ADMIN_ID else "Yo'q ❌"
     await update.message.reply_text(
         f"Sizning ID: `{uid}`\n"
         f"ADMIN\\_ID: `{ADMIN_ID}`\n"
-        f"Admin: *{'Ha ✅' if uid == ADMIN_ID else \"Yo'q ❌\"}*",
+        f"Admin: *{is_admin}*",
         parse_mode="Markdown",
     )
 
