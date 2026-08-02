@@ -1,5 +1,6 @@
 import re
 import requests
+from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://mandat.uzbmb.uz"
@@ -36,16 +37,35 @@ def get_student_data(entrant_id):
             if s_input:
                 page_size = int(s_input['value'])
 
-        # Fanlarni topish
-        s4subject, s5subject = None, None
+        # Fanlarni va boshqa parametrlarni topish
+        s4subject, s5subject, ed_lang_id = None, None, None
         first_form = soup.find('form', action='/Bakalavr/Paginate')
         if first_form:
             s4 = first_form.find('input', {'name': 's4subject'})
             s5 = first_form.find('input', {'name': 's5subject'})
+            ed = first_form.find('input', {'name': 'edLangId'})
             if s4:
                 s4subject = s4['value']
             if s5:
                 s5subject = s5['value']
+            if ed:
+                ed_lang_id = ed['value']
+
+        # Sahifa linki
+        page_link = None
+        if page_number:
+            params = {
+                'pageNumber': page_number,
+                'pageSize': page_size,
+                'lang': 'uz',
+            }
+            if s4subject:
+                params['s4subject'] = s4subject
+            if s5subject:
+                params['s5subject'] = s5subject
+            if ed_lang_id:
+                params['edLangId'] = ed_lang_id
+            page_link = f"{BASE_URL}/Bakalavr/Paginate?{urlencode(params)}"
 
         # O'quvchini qidirish
         target_id = clean_id(str(entrant_id))
@@ -82,6 +102,7 @@ def get_student_data(entrant_id):
                         "rank": rank,
                         "s4subject": s4subject,
                         "s5subject": s5subject,
+                        "page_link": page_link,
                     }
                 }
 
