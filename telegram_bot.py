@@ -23,6 +23,12 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
 
 USERS_PER_PAGE = 20
 
+def escape_md(text: str) -> str:
+    """Markdown V1 uchun maxsus belgilarni escape qiladi."""
+    for ch in ['_', '*', '`', '[']:
+        text = text.replace(ch, '\\' + ch)
+    return text
+
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
 _sheet = None
@@ -279,8 +285,8 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     for i, u in enumerate(users_slice, start=start_num):
         first  = u.get("first_name", "") or ""
         last_n = u.get("last_name",  "") or ""
-        full_name    = (first + " " + last_n).strip() or "Noma'lum"
-        username_str = u.get("username") or "username yo'q"
+        full_name    = escape_md((first + " " + last_n).strip() or "Noma'lum")
+        username_str = escape_md(u.get("username") or "username yo'q")
         count        = int(u.get("query_count") or 0)
 
         raw_last = u.get("last_seen", "")
@@ -309,12 +315,12 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ── main ──────────────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    import os
+    import os as _os
     from telegram.error import Conflict
     if isinstance(context.error, Conflict):
         print("[CONFLICT] Boshqa bot instance ishlayapti — process to'xtatildi.")
-        os._exit(1)
-    print(f"[Xato] {context.error}")
+        _os._exit(1)
+    print(f"[Xato] {type(context.error).__name__}: {context.error}")
 
 
 def main() -> None:
