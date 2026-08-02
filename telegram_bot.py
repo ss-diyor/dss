@@ -175,7 +175,7 @@ def format_result(d: dict) -> str:
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await asyncio.to_thread(record_user, update.effective_user)
+    asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
     await update.message.reply_text(
         "Assalomu alaykum, hurmatli abituriyent \U0001f44b\n\n"
         "Ushbu bot orqali siz umumiy o'rningizni bilib olishingiz mumkin.\n"
@@ -188,7 +188,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await asyncio.to_thread(record_user, update.effective_user)
+    asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
     await update.message.reply_text(
         "\U0001f4d6 *Foydalanish:*\n\n"
         "7 xonali abituriyent ID raqamini yuboring.\n"
@@ -207,7 +207,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_input = update.message.text.strip()
 
     if not (user_input.isdigit() and len(user_input) == 7):
-        await asyncio.to_thread(record_user, update.effective_user)
+        asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
         await update.message.reply_text(
             "\u26a0\ufe0f Iltimos, *7 xonali* abituriyent ID raqamini kiriting.\n"
             "Misol: `6156306`",
@@ -215,7 +215,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
-    await asyncio.to_thread(record_user, update.effective_user, True)
+    asyncio.create_task(asyncio.to_thread(record_user, update.effective_user, True))
     await update.message.reply_text("\U0001f50d Qidirilmoqda... iltimos kuting.")
 
     result = get_student_data(user_input)
