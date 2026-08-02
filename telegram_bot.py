@@ -97,39 +97,31 @@ def record_user(user, query: bool = False) -> None:
 
 
 def get_stats() -> dict:
-    try:
-        records = _all_records()
-        total_users   = len(records)
-        total_queries = sum(int(r.get("query_count") or 0) for r in records)
+    records = _all_records()
+    total_users   = len(records)
+    total_queries = sum(int(r.get("query_count") or 0) for r in records)
 
-        last_seen = ""
-        if records:
-            latest = max(records, key=lambda r: r.get("last_seen", ""))
-            raw = latest.get("last_seen", "")
-            if raw:
-                try:
-                    dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
-                    last_seen = dt.strftime("%d.%m.%Y %H:%M")
-                except ValueError:
-                    last_seen = raw
+    last_seen = ""
+    if records:
+        latest = max(records, key=lambda r: r.get("last_seen", ""))
+        raw = latest.get("last_seen", "")
+        if raw:
+            try:
+                dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+                last_seen = dt.strftime("%d.%m.%Y %H:%M")
+            except ValueError:
+                last_seen = raw
 
-        return {"total_users": total_users, "total_queries": total_queries, "last_seen": last_seen}
-    except Exception as e:
-        print(f"[get_stats xato] {e}")
-        return {"total_users": 0, "total_queries": 0, "last_seen": ""}
+    return {"total_users": total_users, "total_queries": total_queries, "last_seen": last_seen}
 
 
 def get_users_page(page: int) -> tuple[list, int]:
-    try:
-        records = _all_records()
-        sorted_records = sorted(records, key=lambda r: r.get("first_seen", ""))
-        total = len(sorted_records)
-        start = (page - 1) * USERS_PER_PAGE
-        end   = start + USERS_PER_PAGE
-        return sorted_records[start:end], total
-    except Exception as e:
-        print(f"[get_users_page xato] {e}")
-        return [], 0
+    records = _all_records()
+    sorted_records = sorted(records, key=lambda r: r.get("first_seen", ""))
+    total = len(sorted_records)
+    start = (page - 1) * USERS_PER_PAGE
+    end   = start + USERS_PER_PAGE
+    return sorted_records[start:end], total
 
 # ── Formatlash ────────────────────────────────────────────────────────────────
 
@@ -227,15 +219,21 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
 
-    s = await asyncio.to_thread(get_stats)
-    last = s["last_seen"] if s["last_seen"] else "Hali yo'q"
-    await update.message.reply_text(
-        "\U0001f4ca *Statistika*\n\n"
-        f"\U0001f465 Jami foydalanuvchilar: *{s['total_users']}*\n"
-        f"\U0001f50d Jami so'rovlar: *{s['total_queries']}*\n"
-        f"\U0001f550 So'nggi faollik: *{last}*",
-        parse_mode="Markdown",
-    )
+    try:
+        s = await asyncio.to_thread(get_stats)
+        last = s["last_seen"] if s["last_seen"] else "Hali yo'q"
+        await update.message.reply_text(
+            "\U0001f4ca *Statistika*\n\n"
+            f"\U0001f465 Jami foydalanuvchilar: *{s['total_users']}*\n"
+            f"\U0001f50d Jami so'rovlar: *{s['total_queries']}*\n"
+            f"\U0001f550 So'nggi faollik: *{last}*",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        await update.message.reply_text(
+            f"\u274c *Sheets xatosi:*\n`{e}`",
+            parse_mode="Markdown",
+        )
 
 
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -250,7 +248,14 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except (ValueError, IndexError):
         page = 1
 
-    users_slice, total = await asyncio.to_thread(get_users_page, page)
+    try:
+        users_slice, total = await asyncio.to_thread(get_users_page, page)
+    except Exception as e:
+        await update.message.reply_text(
+            f"\u274c *Sheets xatosi:*\n`{e}`",
+            parse_mode="Markdown",
+        )
+        return
 
     if total == 0:
         await update.message.reply_text("Hali hech kim foydalanmagan.")
