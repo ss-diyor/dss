@@ -16,6 +16,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 # SHEET_ID               — spreadsheet URL dagi uzun ID
 SHEET_ID               = os.getenv("SHEET_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+LOG_GROUP_ID            = os.getenv("LOG_GROUP_ID", "")
 
 SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADERS = ["user_id", "first_name", "last_name", "username",
@@ -170,8 +171,32 @@ def format_result(d: dict) -> str:
     if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
     if subjects:
         lines.append(f"\U0001f4da Fanlar: {' | '.join(subjects)}")
-    lines.append("\n— @mandat\_applicant\_ratingbot orqali tekshirildi")
+    lines.append("\n— @mandat\\_applicant\\_ratingbot orqali tekshirildi")
     return "\n".join(lines)
+
+# ── Guruh bildirishnomasi ─────────────────────────────────────────────────────
+
+async def _notify_group(bot, user, queried_id: str) -> None:
+    """Muvaffaqiyatli so'rovdan keyin log guruhiga xabar yuboradi."""
+    if not LOG_GROUP_ID:
+        return
+    try:
+        first     = user.first_name or ""
+        last      = user.last_name  or ""
+        full_name = (first + " " + last).strip() or "Noma'lum"
+        username  = f"@{user.username}" if user.username else "yo'q"
+        now       = datetime.now().strftime("%d.%m.%Y %H:%M")
+        text = (
+            "🔔 <b>Yangi so'rov</b>\n\n"
+            f"👤 Ism: {_he(full_name)}\n"
+            f"🆔 Telegram ID: <code>{user.id}</code>\n"
+            f"📱 Username: {_he(username)}\n"
+            f"🔍 Qidirgan ID: <code>{_he(queried_id)}</code>\n"
+            f"🕐 Vaqt: {now}"
+        )
+        await bot.send_message(chat_id=int(LOG_GROUP_ID), text=text, parse_mode="HTML")
+    except Exception as e:
+        print(f"[_notify_group xato] {e}")
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -234,6 +259,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode="Markdown",
         )
 
+        # Guruhga bildirishnoma — background task, foydalanuvchi kutmaydi
+        asyncio.create_task(_notify_group(context.bot, update.effective_user, user_input))
+
         # 2-xabar: jami hisoblanmoqda
         if d.get("rank") and d.get("page_number"):
             counting_msg = await update.message.reply_text(
@@ -251,7 +279,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await counting_msg.edit_text(
                     f"\U0001f4ca Jami *{total}* ta abituriyent ichida "
                     f"*{d['rank']}*-o'rin (top *{pct}%*)\n\n"
-                    "— @mandat\_applicant\_ratingbot orqali tekshirildi",
+                    "— @mandat\\_applicant\\_ratingbot orqali tekshirildi",
                     parse_mode="Markdown",
                 )
             else:
