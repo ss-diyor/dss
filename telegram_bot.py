@@ -144,40 +144,50 @@ def record_user(user, query: bool = False) -> None:
         row = _row_num(records, uid)
 
         if row is None:
-            # Yangi foydalanuvchini jadvalning haqiqiy oxiriga qo'shamiz
-            # append_row ba'zan bo'sh satrlardan keyin yozishi mumkin, 
-            # shuning uchun ehtiyotkorlik bilan ishlaymiz.
-            sheet.append_row([
+            # Yangi foydalanuvchini jadvalning oxiriga qo'shish
+            # HEADERS = ["user_id", "first_name", "last_name", "username", "first_seen", "last_seen", "query_count"]
+            # Jami 7 ta ustun (A dan G gacha)
+            new_row = [
                 uid,
                 user.first_name or "",
                 user.last_name  or "",
                 ("@" + user.username) if user.username else "",
                 now, now,
                 1 if query else 0,
-            ])
+            ]
+            # append_row o'rniga aniq oxirgi satrni aniqlab yozamiz
+            # valid_records dan foydalanib haqiqiy oxirgi satrni topamiz
+            valid_recs = [r for r in records if str(r.get("user_id") or "").strip()]
+            next_row = len(valid_recs) + 2
+            sheet.update(range_name=f"A{next_row}:G{next_row}", values=[new_row])
         else:
-            # Agar bir xil UID li bir nechta satr bo'lsa, oxirgisini olamiz
+            # Mavjud foydalanuvchini yangilash
             user_map = {}
             for r in records:
                 if str(r.get("user_id")):
                     user_map[str(r["user_id"])] = r
             existing = user_map[uid]
+            
             try:
                 count = int(float(str(existing.get("query_count") or 0)))
             except:
                 count = 0
             if query:
                 count += 1
+                
+            # A dan G gacha barcha ustunlarni yangilaymiz (user_id dan query_count gacha)
+            updated_values = [
+                uid,
+                user.first_name or "",
+                user.last_name  or "",
+                ("@" + user.username) if user.username else "",
+                existing.get("first_seen", now),
+                now,
+                count,
+            ]
             sheet.update(
-                range_name=f"B{row}:G{row}",
-                values=[[
-                    user.first_name or "",
-                    user.last_name  or "",
-                    ("@" + user.username) if user.username else "",
-                    existing.get("first_seen", now),
-                    now,
-                    count,
-                ]],
+                range_name=f"A{row}:G{row}",
+                values=[updated_values],
             )
     except Exception as e:
         print(f"[record_user xato] {e}")
