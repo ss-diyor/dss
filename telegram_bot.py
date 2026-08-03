@@ -780,6 +780,14 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
 
+    # Admin buyruqlari fallback uchun umumiy ro'yxat
+    _admin_fallbacks = [
+        CommandHandler("stats",     admin_stats),
+        CommandHandler("users",     admin_users),
+        CommandHandler("user",      admin_user),
+        CommandHandler("broadcast", admin_broadcast),
+    ]
+
     # Foydalanuvchi murojaati — /contact yoki inline tugma
     contact_conv = ConversationHandler(
         entry_points=[
@@ -791,7 +799,7 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, contact_receive),
             ],
         },
-        fallbacks=[CommandHandler("cancel", contact_cancel)],
+        fallbacks=[CommandHandler("cancel", contact_cancel)] + _admin_fallbacks,
     )
 
     # Admin javobi — inline "Javob berish" tugmasi
@@ -804,24 +812,19 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, admin_reply_send),
             ],
         },
-        fallbacks=[CommandHandler("cancel", admin_reply_cancel)],
+        fallbacks=[CommandHandler("cancel", admin_reply_cancel)] + _admin_fallbacks,
     )
 
     application.add_handler(contact_conv)
     application.add_handler(admin_reply_conv)
-    application.add_handler(CommandHandler("start",  start))
-    application.add_handler(CommandHandler("help",   help_command))
-    application.add_handler(CommandHandler("whoami", whoami))
+    application.add_handler(CommandHandler("start",     start))
+    application.add_handler(CommandHandler("help",      help_command))
+    application.add_handler(CommandHandler("whoami",    whoami))
+    application.add_handler(CommandHandler("stats",     admin_stats))
+    application.add_handler(CommandHandler("users",     admin_users))
+    application.add_handler(CommandHandler("user",      admin_user))
+    application.add_handler(CommandHandler("broadcast", admin_broadcast))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Admin buyruqlari — group=-1: ConversationHandler holatidan qat'iy nazar ishlaydi
-    for _cmd, _fn in [
-        ("stats",     admin_stats),
-        ("users",     admin_users),
-        ("user",      admin_user),
-        ("broadcast", admin_broadcast),
-    ]:
-        application.add_handler(CommandHandler(_cmd, _fn), group=-1)
     application.add_error_handler(error_handler)
     print("Bot ishga tushdi...")
     application.run_polling(
