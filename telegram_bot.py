@@ -66,10 +66,11 @@ def _get_stats_sheet() -> gspread.Worksheet:
 
 
 def update_stats_sheet() -> None:
-    """Statistics varag'ini joriy ma'lumotlar bilan yangilaydi."""
+    """Statistics varag'ini tarixiy ma'lumotlar bilan yangilaydi."""
     try:
         records = _all_records()
-        today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
+        today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
+        today_full = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
 
         # Faqat user_id mavjud bo'lgan satrlarni olamiz
         valid_records = [r for r in records if str(r.get("user_id") or "").strip()]
@@ -84,11 +85,11 @@ def update_stats_sheet() -> None:
         today_queries = sum(
             _safe_int(r.get("query_count"))
             for r in valid_records
-            if str(r.get("last_seen") or "").startswith(today)
+            if str(r.get("last_seen") or "").startswith(today_full)
         )
         today_new_users = sum(
             1 for r in valid_records
-            if str(r.get("first_seen") or "").startswith(today)
+            if str(r.get("first_seen") or "").startswith(today_full)
         )
 
         top = max(valid_records, key=lambda r: _safe_int(r.get("query_count")), default=None)
@@ -102,17 +103,53 @@ def update_stats_sheet() -> None:
             top_str = "—"
 
         ws = _get_stats_sheet()
-        ws.update(
-            range_name="A1",
-            values=[
-                ["Ko'rsatkich",                   "Qiymat"],
-                ["Jami foydalanuvchilar",          total_users],
-                ["Jami so'rovlar",                 total_queries],
-                ["Bugungi so'rovlar",              today_queries],
-                ["Bugungi yangi foydalanuvchilar", today_new_users],
-                ["Eng faol foydalanuvchi",         top_str],
-            ],
-        )
+        
+        # Yangi headers
+        new_headers = [
+            "Sana", 
+            "Jami foydalanuvchilar", 
+            "Jami so'rovlar", 
+            "Bugungi so'rovlar", 
+            "Bugungi yangi foydalanuvchilar", 
+            "Eng faol foydalanuvchi"
+        ]
+        
+        # Check if headers need to be updated
+        current_headers = ws.row_values(1)
+        if current_headers != new_headers:
+            ws.update(range_name="A1", values=[new_headers])
+        
+        # Get all existing data
+        all_data = ws.get_all_records(expected_headers=new_headers)
+        
+        # Check if today's data already exists
+        today_row = None
+        today_row_num = None
+        
+        for i, row in enumerate(all_data, start=2):  # start=2 because row 1 is headers
+            if str(row.get("Sana", "")) == today:
+                today_row = row
+                today_row_num = i
+                break
+        
+        # Prepare today's data
+        today_data = [
+            today,
+            total_users,
+            total_queries,
+            today_queries,
+            today_new_users,
+            top_str
+        ]
+        
+        if today_row:
+            # Update existing row
+            ws.update(range_name=f"A{today_row_num}:F{today_row_num}", values=[today_data])
+        else:
+            # Add new row at the end
+            next_row = len(all_data) + 2
+            ws.update(range_name=f"A{next_row}:F{next_row}", values=[today_data])
+            
     except Exception as e:
         print(f"[update_stats_sheet xato] {e}")
 
