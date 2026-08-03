@@ -21,6 +21,11 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
 
 USERS_PER_PAGE = 15
 
+# ── Topic management ─────────────────────────────────────────────────────────────
+_topic_cache = {}      # Cache for topic IDs: {subject_combo: topic_id}
+_topics_checked = False # Flag to check if group has Topics enabled
+MAX_TOPICS = 50        # Maximum number of topics to create
+
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
 _sheet = None
@@ -131,7 +136,72 @@ def escape_md(text: str) -> str:
 
 
 def _he(text) -> str:
-    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return str(text or "").replace("&", "&​amp;").replace("<", "&​lt;").replace(">", "&​gt;")
+
+# ── Topic management functions ───────────────────────────────────────────────────
+
+async def _check_forum_enabled(bot) -> bool:
+    """Check if the log group has forum/Topics enabled."""
+    global _topics_checked
+    if _topics_checked:
+        return True
+    
+    if not LOG_GROUP_ID:
+        return False
+    
+    try:
+        chat = await bot.get_chat(int(LOG_GROUP_ID))
+        is_forum = getattr(chat, 'is_forum', False)
+        _topics_checked = is_forum
+        return is_forum
+    except Exception as e:
+        print(f"[_check_forum_enabled xato] {e}")
+        return False
+
+
+def _format_topic_name(s4subject: str, s5subject: str) -> str | None:
+    """Format subject combination as topic name."""
+    subjects = []
+    if s4subject:
+        subjects.append(str(s4subject).strip())
+    if s5subject:
+        subjects.append(str(s5subject).strip())
+    
+    if not subjects:
+        return None
+    
+    return " | ".join(subjects)
+
+
+async def _get_or_create_topic(bot, subject_combo: str) -> int | None:
+    """Get existing topic ID or create new topic for subject combination."""
+    global _topic_cache
+    
+    # Check cache first
+    if subject_combo in _topic_cache:
+        return _topic_cache[subject_combo]
+    
+    if not LOG_GROUP_ID:
+        return None
+    
+    try:
+        # Check if we've reached the topic limit
+        if len(_topic_cache) >= MAX_TOPICS:
+            print(f"[_get_or_create_topic] Topic limit reached ({MAX_TOPICS})")
+            return None
+        
+        # Create new topic
+        topic = await bot.create_forum_topic(
+            chat_id=int(LOG_GROUP_ID),
+            name=subject_combo
+        )
+        topic_id = topic.message_thread_id
+        _topic_cache[subject_combo] = topic_id
+        print(f"[_get_or_create_topic] Created topic: {subject_combo} (ID: {topic_id})")
+        return topic_id
+    except Exception as e:
+        print(f"[_get_or_create_topic xato] {e}")
+        return None
 
 # ── Ma'lumot funksiyalari ──────────────────────────────────────────────────────
 
@@ -313,7 +383,25 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
             f"\n\u2014 <b>Natija</b> \u2014\n"
             f"<tg-spoiler>{natija}</tg-spoiler>"
         )
-        await bot.send_message(chat_id=int(LOG_GROUP_ID), text=text, parse_mode="HTML")
+        
+        # Try to use Topics if enabled
+        message_thread_id = None
+        forum_enabled = await _check_forum_enabled(bot)
+        
+        if forum_enabled:
+            topic_name = _format_topic_name(data.get("s4subject"), data.get("s5subject"))
+            if topic_name:
+                topic_id = await _get_or_create_topic(bot, topic_name)
+                if topic_id:
+                    message_thread_id = topic_id
+        
+        # Send message to topic or general chat
+        await bot.send_message(
+            chat_id=int(LOG_GROUP_ID), 
+            text=text, 
+            parse_mode="HTML",
+            message_thread_id=message_thread_id
+        )
     except Exception as e:
         print(f"[_notify_group xato] {e}")
 
