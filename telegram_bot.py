@@ -685,7 +685,15 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, admin_reply_send),
             ],
         },
-        fallbacks=[CommandHandler("cancel", admin_reply_cancel)],
+        fallbacks=[
+            CommandHandler("cancel",    admin_reply_cancel),
+            CommandHandler("stats",     admin_stats),
+            CommandHandler("users",     admin_users),
+            CommandHandler("user",      admin_user),
+            CommandHandler("broadcast", admin_broadcast),
+            CommandHandler("whoami",    whoami),
+        ],
+        allow_reentry=True,
     )
 
     application.add_handler(contact_conv)
