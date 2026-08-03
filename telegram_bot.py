@@ -19,7 +19,7 @@ SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADERS = ["user_id", "first_name", "last_name", "username",
            "first_seen", "last_seen", "query_count"]
 
-USERS_PER_PAGE = 20
+USERS_PER_PAGE = 15
 
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
@@ -67,24 +67,28 @@ def update_stats_sheet() -> None:
         today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
 
         total_users   = len(records)
-        total_queries = sum(int(r.get("query_count") or 0) for r in records)
+        def _safe_int(v):
+            try: return int(float(str(v or 0)))
+            except: return 0
+
+        total_queries = sum(_safe_int(r.get("query_count")) for r in records)
 
         today_queries = sum(
-            int(r.get("query_count") or 0)
+            _safe_int(r.get("query_count"))
             for r in records
-            if str(r.get("last_seen", "")).startswith(today)
+            if str(r.get("last_seen") or "").startswith(today)
         )
         today_new_users = sum(
             1 for r in records
-            if str(r.get("first_seen", "")).startswith(today)
+            if str(r.get("first_seen") or "").startswith(today)
         )
 
-        top = max(records, key=lambda r: int(r.get("query_count") or 0), default=None)
+        top = max(records, key=lambda r: _safe_int(r.get("query_count")), default=None)
         if top:
-            first  = top.get("first_name", "") or ""
-            last_n = top.get("last_name",  "") or ""
+            first  = top.get("first_name") or ""
+            last_n = top.get("last_name")  or ""
             top_name  = (first + " " + last_n).strip() or "Noma'lum"
-            top_count = int(top.get("query_count") or 0)
+            top_count = _safe_int(top.get("query_count"))
             top_str   = f"{top_name} ({top_count} ta)"
         else:
             top_str = "—"
@@ -147,7 +151,10 @@ def record_user(user, query: bool = False) -> None:
             ])
         else:
             existing = {str(r.get("user_id")): r for r in records}[uid]
-            count = int(existing.get("query_count") or 0)
+            try:
+                count = int(float(str(existing.get("query_count") or 0)))
+            except:
+                count = 0
             if query:
                 count += 1
             sheet.update(
@@ -173,12 +180,16 @@ def record_user(user, query: bool = False) -> None:
 def get_stats() -> dict:
     records = _all_records()
     total_users   = len(records)
-    total_queries = sum(int(r.get("query_count") or 0) for r in records)
+    def _safe_int(v):
+        try: return int(float(str(v or 0)))
+        except: return 0
+
+    total_queries = sum(_safe_int(r.get("query_count")) for r in records)
 
     last_seen = ""
     if records:
-        latest = max(records, key=lambda r: r.get("last_seen", ""))
-        raw = latest.get("last_seen", "")
+        latest = max(records, key=lambda r: str(r.get("last_seen") or ""))
+        raw = latest.get("last_seen") or ""
         if raw:
             try:
                 dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
@@ -191,7 +202,7 @@ def get_stats() -> dict:
 
 def get_users_page(page: int) -> tuple[list, int]:
     records = _all_records()
-    sorted_records = sorted(records, key=lambda r: r.get("first_seen", ""))
+    sorted_records = sorted(records, key=lambda r: str(r.get("first_seen") or ""), reverse=True)
     total = len(sorted_records)
     start = (page - 1) * USERS_PER_PAGE
     end   = start + USERS_PER_PAGE
@@ -413,7 +424,10 @@ async def admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     last_n = rec.get("last_name",  "") or ""
     full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
     username_str = _he(rec.get("username") or "yo'q")
-    query_count  = int(rec.get("query_count") or 0)
+    try:
+        query_count = int(float(str(rec.get("query_count") or 0)))
+    except:
+        query_count = 0
 
     def fmt_dt(raw):
         try:
@@ -446,18 +460,18 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     try:
         s = await asyncio.to_thread(get_stats)
-        last = s["last_seen"] if s["last_seen"] else "Hali yo'q"
-        await update.message.reply_text(
-            "\U0001f4ca *Statistika*\n\n"
-            f"\U0001f465 Jami foydalanuvchilar: *{s['total_users']}*\n"
-            f"\U0001f50d Jami so'rovlar: *{s['total_queries']}*\n"
-            f"\U0001f550 So'nggi faollik: *{last}*",
-            parse_mode="Markdown",
+        last = _he(s["last_seen"] if s["last_seen"] else "Hali yo'q")
+        text = (
+            "\U0001f4ca <b>Statistika</b>\n\n"
+            f"\U0001f465 Jami foydalanuvchilar: <b>{s['total_users']}</b>\n"
+            f"\U0001f50d Jami so'rovlar: <b>{s['total_queries']}</b>\n"
+            f"\U0001f550 So'nggi faollik: <b>{last}</b>"
         )
+        await update.message.reply_text(text, parse_mode="HTML")
     except Exception as e:
         await update.message.reply_text(
-            f"\u274c *Sheets xatosi:*\n`{e}`",
-            parse_mode="Markdown",
+            f"\u274c <b>Sheets xatosi:</b>\n<code>{_he(str(e))}</code>",
+            parse_mode="HTML",
         )
 
 
@@ -506,14 +520,17 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         last_n = u.get("last_name",  "") or ""
         full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
         username_str = _he(u.get("username") or "username yo'q")
-        count        = int(u.get("query_count") or 0)
-
-        raw_last = u.get("last_seen", "")
         try:
-            dt = datetime.strptime(raw_last, "%Y-%m-%d %H:%M:%S")
+            count = int(float(str(u.get("query_count") or 0)))
+        except:
+            count = 0
+
+        raw_last = u.get("last_seen") or ""
+        try:
+            dt = datetime.strptime(str(raw_last), "%Y-%m-%d %H:%M:%S")
             last_date = dt.strftime("%d.%m.%Y")
         except (ValueError, TypeError):
-            last_date = (raw_last[:10] if raw_last else "\u2014")
+            last_date = (str(raw_last)[:10] if raw_last else "\u2014")
 
         lines.append(
             f"{i}. {full_name} ({username_str})"
