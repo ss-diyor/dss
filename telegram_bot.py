@@ -1,17 +1,11 @@
 import os
 import json
 import asyncio
-import warnings
 from datetime import datetime, timezone, timedelta
 from telegram import Update
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    filters, ContextTypes,
-)
-from telegram.warnings import PTBUserWarning
-
-warnings.filterwarnings("ignore", category=PTBUserWarning, message=".*per_message.*")
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import gspread
+from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
 
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -21,6 +15,7 @@ SHEET_ID                = os.getenv("SHEET_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 LOG_GROUP_ID            = os.getenv("LOG_GROUP_ID", "")
 
+SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADERS = ["user_id", "first_name", "last_name", "username",
            "first_seen", "last_seen", "query_count"]
 
@@ -28,29 +23,33 @@ USERS_PER_PAGE = 20
 
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
-_sheet       = None
+_sheet = None
 _stats_sheet = None
 
 def _get_sheet() -> gspread.Worksheet:
     global _sheet
     if _sheet is not None:
         return _sheet
-    creds_info  = json.loads(GOOGLE_CREDENTIALS_JSON)
-    client      = gspread.service_account_from_dict(creds_info)
+    creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(SHEET_ID)
     ws = spreadsheet.sheet1
-    if ws.row_values(1) != HEADERS:
+    first_row = ws.row_values(1)
+    if first_row != HEADERS:
         ws.update(range_name="A1", values=[HEADERS])
     _sheet = ws
     return _sheet
 
 
 def _get_stats_sheet() -> gspread.Worksheet:
+    """'Statistics' varag'ini qaytaradi, yo'q bo'lsa yaratadi."""
     global _stats_sheet
     if _stats_sheet is not None:
         return _stats_sheet
-    creds_info  = json.loads(GOOGLE_CREDENTIALS_JSON)
-    client      = gspread.service_account_from_dict(creds_info)
+    creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(SHEET_ID)
     try:
         ws = spreadsheet.worksheet("Statistics")
@@ -62,12 +61,14 @@ def _get_stats_sheet() -> gspread.Worksheet:
 
 
 def update_stats_sheet() -> None:
+    """Statistics varag'ini joriy ma'lumotlar bilan yangilaydi."""
     try:
         records = _all_records()
-        today   = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
+        today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
 
         total_users   = len(records)
         total_queries = sum(int(r.get("query_count") or 0) for r in records)
+
         today_queries = sum(
             int(r.get("query_count") or 0)
             for r in records
@@ -77,16 +78,19 @@ def update_stats_sheet() -> None:
             1 for r in records
             if str(r.get("first_seen", "")).startswith(today)
         )
+
         top = max(records, key=lambda r: int(r.get("query_count") or 0), default=None)
         if top:
             first  = top.get("first_name", "") or ""
             last_n = top.get("last_name",  "") or ""
             top_name  = (first + " " + last_n).strip() or "Noma'lum"
-            top_str   = f"{top_name} ({int(top.get('query_count') or 0)} ta)"
+            top_count = int(top.get("query_count") or 0)
+            top_str   = f"{top_name} ({top_count} ta)"
         else:
             top_str = "—"
 
-        _get_stats_sheet().update(
+        ws = _get_stats_sheet()
+        ws.update(
             range_name="A1",
             values=[
                 ["Ko'rsatkich",                   "Qiymat"],
@@ -126,11 +130,11 @@ def _he(text) -> str:
 
 def record_user(user, query: bool = False) -> None:
     try:
-        uid    = str(user.id)
-        now    = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d %H:%M:%S")
-        sheet   = _get_sheet()
+        uid = str(user.id)
+        now = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d %H:%M:%S")
+        sheet = _get_sheet()
         records = _all_records()
-        row     = _row_num(records, uid)
+        row = _row_num(records, uid)
 
         if row is None:
             sheet.append_row([
@@ -143,7 +147,7 @@ def record_user(user, query: bool = False) -> None:
             ])
         else:
             existing = {str(r.get("user_id")): r for r in records}[uid]
-            count    = int(existing.get("query_count") or 0)
+            count = int(existing.get("query_count") or 0)
             if query:
                 count += 1
             sheet.update(
@@ -167,24 +171,26 @@ def record_user(user, query: bool = False) -> None:
 
 
 def get_stats() -> dict:
-    records       = _all_records()
+    records = _all_records()
     total_users   = len(records)
     total_queries = sum(int(r.get("query_count") or 0) for r in records)
-    last_seen     = ""
+
+    last_seen = ""
     if records:
         latest = max(records, key=lambda r: r.get("last_seen", ""))
-        raw    = latest.get("last_seen", "")
+        raw = latest.get("last_seen", "")
         if raw:
             try:
-                dt        = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+                dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
                 last_seen = dt.strftime("%d.%m.%Y %H:%M")
             except ValueError:
                 last_seen = raw
+
     return {"total_users": total_users, "total_queries": total_queries, "last_seen": last_seen}
 
 
 def get_users_page(page: int) -> tuple[list, int]:
-    records        = _all_records()
+    records = _all_records()
     sorted_records = sorted(records, key=lambda r: r.get("first_seen", ""))
     total = len(sorted_records)
     start = (page - 1) * USERS_PER_PAGE
@@ -195,7 +201,7 @@ def get_users_page(page: int) -> tuple[list, int]:
 
 def format_result(d: dict) -> str:
     status_emoji = "\u2705" if d["is_pass"] else "\u274c"
-    name  = escape_md(str(d.get("name") or ""))
+    name = escape_md(str(d.get("name") or ""))
     lines = [
         f"\U0001f464 *{name}*",
         f"\U0001f194 ID: `{d['id']}`",
@@ -204,10 +210,20 @@ def format_result(d: dict) -> str:
     ]
     if d.get("rank"):
         rank      = d["rank"]
+        total     = d.get("total_count")
         page_link = d.get("page_link")
-        rank_str  = f"*{rank}-o'rin*"
+
+        if total:
+            pct      = round(rank / total * 100, 1)
+            rank_str = f"*{rank}-o'rin* (jami {total} ta abituriyent ichida) — top {pct}%"
+        else:
+            rank_str = f"*{rank}-o'rin*"
+
         if page_link:
-            lines.append(f"\U0001f3c6 Reytingda: {rank_str} \u2014 [Saytda ko'rish]({page_link})")
+            lines.append(
+                f"\U0001f3c6 Reytingda: {rank_str}"
+                f" \u2014 [Saytda ko'rish]({page_link})"
+            )
         else:
             lines.append(f"\U0001f3c6 Reytingda: {rank_str}")
     subjects = []
@@ -221,6 +237,7 @@ def format_result(d: dict) -> str:
 # ── Guruh bildirishnomasi ─────────────────────────────────────────────────────
 
 async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
+    """Muvaffaqiyatli so'rovdan keyin log guruhiga xabar yuboradi."""
     if not LOG_GROUP_ID:
         return
     try:
@@ -233,30 +250,32 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
         student_name = _he(str(data.get("name") or "—"))
         score        = _he(str(data.get("score") or "—"))
         pass_status  = _he(str(data.get("pass_status") or "—"))
-        status_emoji = "✅" if data.get("is_pass") else "❌"
+        status_emoji = "\u2705" if data.get("is_pass") else "\u274c"
 
         subjects = []
         if data.get("s4subject"): subjects.append(_he(str(data["s4subject"])))
         if data.get("s5subject"): subjects.append(_he(str(data["s5subject"])))
         subjects_str = " | ".join(subjects) if subjects else "—"
 
-        rank_str = f"\n🏆 O'rin: <b>{data['rank']}-o'rin</b>" if data.get("rank") else ""
+        rank_str = ""
+        if data.get("rank"):
+            rank_str = f"\n\U0001f3c6 O'rin: <b>{data['rank']}-o'rin</b>"
 
         natija = (
-            f"👤 Abituriyent: {student_name}\n"
-            f"📊 Ball: <b>{score}</b>\n"
-            f"📌 Holat: <b>{pass_status}</b> {status_emoji}\n"
-            f"📚 Fanlar: {subjects_str}"
+            f"\U0001f464 Abituriyent: {student_name}\n"
+            f"\U0001f4ca Ball: <b>{score}</b>\n"
+            f"\U0001f4cc Holat: <b>{pass_status}</b> {status_emoji}\n"
+            f"\U0001f4da Fanlar: {subjects_str}"
             f"{rank_str}"
         )
         text = (
-            "🔔 <b>Yangi so'rov</b>\n\n"
-            f"👤 Ism: {_he(full_name)}\n"
-            f"🆔 Telegram ID: <code>{user.id}</code>\n"
-            f"📱 Username: {_he(username)}\n"
-            f"🔍 Qidirgan ID: <code>{_he(queried_id)}</code>\n"
-            f"🕐 Vaqt: {now}\n\n"
-            f"— <b>Natija</b> —\n"
+            "\U0001f514 <b>Yangi so'rov</b>\n\n"
+            f"\U0001f464 Ism: {_he(full_name)}\n"
+            f"\U0001f194 Telegram ID: <code>{user.id}</code>\n"
+            f"\U0001f4f1 Username: {_he(username)}\n"
+            f"\U0001f50d Qidirgan ID: <code>{_he(queried_id)}</code>\n"
+            f"\U0001f550 Vaqt: {now}\n"
+            f"\n\u2014 <b>Natija</b> \u2014\n"
             f"<tg-spoiler>{natija}</tg-spoiler>"
         )
         await bot.send_message(chat_id=int(LOG_GROUP_ID), text=text, parse_mode="HTML")
@@ -279,6 +298,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Misol:\n`1234567`",
         parse_mode="Markdown",
     )
+
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -313,11 +333,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             counting_msg = await update.message.reply_text(
                 "\u23f3 Jami abituriyentlar soni hisoblanmoqda..."
             )
+
             total = await asyncio.to_thread(
                 get_total_count,
                 d["page_number"], d["page_size"],
                 d.get("s4subject"), d.get("s5subject"), d.get("ed_lang_id"),
             )
+
             if total:
                 pct = round(d["rank"] / total * 100, 1)
                 await counting_msg.edit_text(
@@ -343,8 +365,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ── Admin handlers ────────────────────────────────────────────────────────────
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    uid      = update.effective_user.id
-    is_admin = "Ha ✅" if uid == ADMIN_ID else "Yo'q ❌"
+    uid = update.effective_user.id
+    is_admin = "Ha \u2705" if uid == ADMIN_ID else "Yo'q \u274c"
     await update.message.reply_text(
         f"Sizning ID: `{uid}`\n"
         f"ADMIN\\_ID: `{ADMIN_ID}`\n"
@@ -353,12 +375,77 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
+
+    if not context.args:
+        await update.message.reply_text(
+            "\U0001f464 *Foydalanish:*\n`/user <telegram_id>`\n\nMisol: `/user 123456789`",
+            parse_mode="Markdown",
+        )
+        return
+
+    target_uid = context.args[0].strip()
+    if not target_uid.isdigit():
+        await update.message.reply_text(
+            "\u26a0\ufe0f Telegram ID faqat raqamlardan iborat bo'lishi kerak.",
+        )
+        return
+
     try:
-        s    = await asyncio.to_thread(get_stats)
+        records = await asyncio.to_thread(_all_records)
+    except Exception as e:
+        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
+        return
+
+    rec = next((r for r in records if str(r.get("user_id")) == target_uid), None)
+
+    if rec is None:
+        await update.message.reply_text(
+            f"\u274c <code>{_he(target_uid)}</code> ID li foydalanuvchi topilmadi.",
+            parse_mode="HTML",
+        )
+        return
+
+    first  = rec.get("first_name", "") or ""
+    last_n = rec.get("last_name",  "") or ""
+    full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
+    username_str = _he(rec.get("username") or "yo'q")
+    query_count  = int(rec.get("query_count") or 0)
+
+    def fmt_dt(raw):
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+            return dt.strftime("%d.%m.%Y %H:%M")
+        except (ValueError, TypeError):
+            return _he(raw) if raw else "—"
+
+    first_seen = fmt_dt(rec.get("first_seen", ""))
+    last_seen  = fmt_dt(rec.get("last_seen",  ""))
+
+    await update.message.reply_text(
+        f"\U0001f464 <b>Foydalanuvchi ma'lumotlari</b>\n\n"
+        f"\U0001f194 Telegram ID: <code>{_he(target_uid)}</code>\n"
+        f"\U0001f9d1 Ism: {full_name}\n"
+        f"\U0001f4f1 Username: {username_str}\n"
+        f"\U0001f50d Jami so'rovlar: <b>{query_count}</b> ta\n"
+        f"\U0001f4c5 Birinchi kirish: {first_seen}\n"
+        f"\U0001f550 So'nggi faollik: {last_seen}",
+        parse_mode="HTML",
+    )
+
+
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    uid = update.effective_user.id
+    print(f"[/stats] user_id={uid}, ADMIN_ID={ADMIN_ID}, match={uid == ADMIN_ID}")
+    if uid != ADMIN_ID:
+        await update.message.reply_text("\u26d4 Ruxsat yo'q.")
+        return
+
+    try:
+        s = await asyncio.to_thread(get_stats)
         last = s["last_seen"] if s["last_seen"] else "Hali yo'q"
         await update.message.reply_text(
             "\U0001f4ca *Statistika*\n\n"
@@ -368,129 +455,118 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             parse_mode="Markdown",
         )
     except Exception as e:
-        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"\u274c *Sheets xatosi:*\n`{e}`",
+            parse_mode="Markdown",
+        )
 
 
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
+
     try:
         page = int(context.args[0]) if context.args else 1
-        if page < 1: page = 1
+        if page < 1:
+            page = 1
     except (ValueError, IndexError):
         page = 1
+
     try:
         users_slice, total = await asyncio.to_thread(get_users_page, page)
     except Exception as e:
-        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
-        return
-    if total == 0:
-        await update.message.reply_text("Hali hech kim foydalanmagan.")
-        return
-    total_pages = (total + USERS_PER_PAGE - 1) // USERS_PER_PAGE
-    if page > total_pages:
         await update.message.reply_text(
-            f"\u26a0\ufe0f Sahifa mavjud emas. Jami {total_pages} ta sahifa bor.\nMisol: /users 1"
-        )
-        return
-    start_num = (page - 1) * USERS_PER_PAGE + 1
-    lines = [f"\U0001f465 <b>Foydalanuvchilar ({start_num}-{start_num + len(users_slice) - 1} / {total}):</b>\n"]
-    for i, u in enumerate(users_slice, start=start_num):
-        first        = u.get("first_name", "") or ""
-        last_n       = u.get("last_name",  "") or ""
-        full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
-        username_str = _he(u.get("username") or "username yo'q")
-        count        = int(u.get("query_count") or 0)
-        raw_last     = u.get("last_seen", "")
-        try:
-            dt        = datetime.strptime(raw_last, "%Y-%m-%d %H:%M:%S")
-            last_date = dt.strftime("%d.%m.%Y")
-        except (ValueError, TypeError):
-            last_date = (raw_last[:10] if raw_last else "\u2014")
-        lines.append(f"{i}. {full_name} ({username_str}) \u2014 {count} so'rov, oxirgi: {last_date}")
-    if total_pages > 1:
-        if page < total_pages:
-            lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}  |  Keyingisi: /users {page + 1}")
-        else:
-            lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-
-
-async def admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("\u26d4 Ruxsat yo'q.")
-        return
-    if not context.args:
-        await update.message.reply_text(
-            "\U0001f464 *Foydalanish:*\n`/user <telegram_id>`\n\nMisol: `/user 123456789`",
+            f"\u274c *Sheets xatosi:*\n`{e}`",
             parse_mode="Markdown",
         )
         return
-    target_uid = context.args[0].strip()
-    if not target_uid.isdigit():
-        await update.message.reply_text("\u26a0\ufe0f Telegram ID faqat raqamlardan iborat bo'lishi kerak.")
+
+    if total == 0:
+        await update.message.reply_text("Hali hech kim foydalanmagan.")
         return
-    try:
-        records = await asyncio.to_thread(_all_records)
-    except Exception as e:
-        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
-        return
-    rec = next((r for r in records if str(r.get("user_id")) == target_uid), None)
-    if rec is None:
+
+    total_pages = (total + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+
+    if page > total_pages:
         await update.message.reply_text(
-            f"\u274c <code>{_he(target_uid)}</code> ID li foydalanuvchi topilmadi.", parse_mode="HTML"
+            f"\u26a0\ufe0f Sahifa mavjud emas. Jami {total_pages} ta sahifa bor.\n"
+            "Misol: /users 1"
         )
         return
-    first        = rec.get("first_name", "") or ""
-    last_n       = rec.get("last_name",  "") or ""
-    full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
-    username_str = _he(rec.get("username") or "yo'q")
-    query_count  = int(rec.get("query_count") or 0)
 
-    def fmt_dt(raw):
+    start_num = (page - 1) * USERS_PER_PAGE + 1
+    lines = [
+        f"\U0001f465 <b>Foydalanuvchilar "
+        f"({start_num}-{start_num + len(users_slice) - 1} / {total}):</b>\n"
+    ]
+
+    for i, u in enumerate(users_slice, start=start_num):
+        first  = u.get("first_name", "") or ""
+        last_n = u.get("last_name",  "") or ""
+        full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
+        username_str = _he(u.get("username") or "username yo'q")
+        count        = int(u.get("query_count") or 0)
+
+        raw_last = u.get("last_seen", "")
         try:
-            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y %H:%M")
+            dt = datetime.strptime(raw_last, "%Y-%m-%d %H:%M:%S")
+            last_date = dt.strftime("%d.%m.%Y")
         except (ValueError, TypeError):
-            return _he(raw) if raw else "—"
+            last_date = (raw_last[:10] if raw_last else "\u2014")
 
-    await update.message.reply_text(
-        f"\U0001f464 <b>Foydalanuvchi ma'lumotlari</b>\n\n"
-        f"\U0001f194 Telegram ID: <code>{_he(target_uid)}</code>\n"
-        f"\U0001f9d1 Ism: {full_name}\n"
-        f"\U0001f4f1 Username: {username_str}\n"
-        f"\U0001f50d Jami so'rovlar: <b>{query_count}</b> ta\n"
-        f"\U0001f4c5 Birinchi kirish: {fmt_dt(rec.get('first_seen', ''))}\n"
-        f"\U0001f550 So'nggi faollik: {fmt_dt(rec.get('last_seen', ''))}",
-        parse_mode="HTML",
-    )
+        lines.append(
+            f"{i}. {full_name} ({username_str})"
+            f" \u2014 {count} so'rov, oxirgi: {last_date}"
+        )
+
+    if total_pages > 1:
+        if page < total_pages:
+            lines.append(
+                f"\n\U0001f4c4 Sahifa: {page}/{total_pages}"
+                f"  |  Keyingisi: /users {page + 1}"
+            )
+        else:
+            lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
+
     if not context.args:
         await update.message.reply_text(
-            "\U0001f4e2 *Broadcast foydalanish:*\n`/broadcast <xabar matni>`\n\n"
-            "Markdown qo'llab-quvvatlanadi:\n`*qalin*`  `_kursiv_`  `` `kod` ``",
+            "\U0001f4e2 *Broadcast foydalanish:*\n"
+            "`/broadcast <xabar matni>`\n\n"
+            "Markdown qo'llab-quvvatlanadi:\n"
+            "`*qalin*`  `_kursiv_`  `` `kod` ``",
             parse_mode="Markdown",
         )
         return
-    raw  = update.message.text or ""
+
+    raw = update.message.text or ""
     text = raw.split(None, 1)[1] if " " in raw or "\n" in raw else ""
+
     try:
         records = await asyncio.to_thread(_all_records)
     except Exception as e:
         await update.message.reply_text(f"\u274c Sheets xatosi:\n`{e}`", parse_mode="Markdown")
         return
+
     user_ids = [str(r.get("user_id")) for r in records if r.get("user_id")]
+
     if not user_ids:
         await update.message.reply_text("Hali foydalanuvchilar yo'q.")
         return
-    total      = len(user_ids)
+
+    total = len(user_ids)
     status_msg = await update.message.reply_text(f"\U0001f4e4 Yuborilmoqda... 0/{total}")
+
     success, blocked, failed = 0, [], []
+
     for i, uid in enumerate(user_ids, 1):
         try:
             try:
@@ -507,29 +583,38 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 blocked.append(uid)
             else:
                 failed.append(uid)
+
         if i % 10 == 0 or i == total:
             try:
                 await status_msg.edit_text(f"\U0001f4e4 Yuborilmoqda... {i}/{total}")
             except Exception:
                 pass
+
         await asyncio.sleep(1)
-    lines = ["\U0001f4e2 *Broadcast yakunlandi*\n", f"\u2705 Muvaffaqiyatli: *{success}* ta"]
+
+    lines = ["\U0001f4e2 *Broadcast yakunlandi*\n",
+             f"\u2705 Muvaffaqiyatli: *{success}* ta"]
+
     if blocked:
         lines.append(f"\U0001f6ab Bot blok qilgan: *{len(blocked)}* ta")
         preview = ", ".join(f"`{u}`" for u in blocked[:20])
-        if len(blocked) > 20: preview += f" ... va yana {len(blocked) - 20} ta"
+        if len(blocked) > 20:
+            preview += f" ... va yana {len(blocked) - 20} ta"
         lines.append(f"   {preview}")
+
     if failed:
         lines.append(f"\u26a0\ufe0f Boshqa xato: *{len(failed)}* ta")
         preview = ", ".join(f"`{u}`" for u in failed[:10])
-        if len(failed) > 10: preview += f" ... va yana {len(failed) - 10} ta"
+        if len(failed) > 10:
+            preview += f" ... va yana {len(failed) - 10} ta"
         lines.append(f"   {preview}")
+
     try:
         await status_msg.edit_text("\n".join(lines), parse_mode="Markdown")
     except Exception:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-# ── Error handler ─────────────────────────────────────────────────────────────
+# ── main ──────────────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     import os
@@ -539,20 +624,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         os._exit(1)
     print(f"[Xato] {context.error}")
 
-# ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
-
     application.add_handler(CommandHandler("start",     start))
     application.add_handler(CommandHandler("whoami",    whoami))
+    application.add_handler(CommandHandler("user",      admin_user))
     application.add_handler(CommandHandler("stats",     admin_stats))
     application.add_handler(CommandHandler("users",     admin_users))
-    application.add_handler(CommandHandler("user",      admin_user))
     application.add_handler(CommandHandler("broadcast", admin_broadcast))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
-
     print("Bot ishga tushdi...")
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
