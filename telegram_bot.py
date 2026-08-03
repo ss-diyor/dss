@@ -110,7 +110,7 @@ def update_stats_sheet() -> None:
 
 
 def _all_records() -> list[dict]:
-    return _get_sheet().get_all_records()
+    return _get_sheet().get_all_records(expected_headers=HEADERS)
 
 
 def _row_num(records: list[dict], uid: str):
