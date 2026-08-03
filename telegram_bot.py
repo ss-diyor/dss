@@ -13,7 +13,6 @@ from telegram.warnings import PTBUserWarning
 
 warnings.filterwarnings("ignore", category=PTBUserWarning, message=".*per_message.*")
 import gspread
-from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
 
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -23,7 +22,6 @@ SHEET_ID                = os.getenv("SHEET_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 LOG_GROUP_ID            = os.getenv("LOG_GROUP_ID", "")
 
-SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADERS = ["user_id", "first_name", "last_name", "username",
            "first_seen", "last_seen", "query_count"]
 
@@ -39,9 +37,8 @@ def _get_sheet() -> gspread.Worksheet:
     global _sheet
     if _sheet is not None:
         return _sheet
-    creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
-    creds      = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-    client     = gspread.authorize(creds)
+    creds_info  = json.loads(GOOGLE_CREDENTIALS_JSON)
+    client      = gspread.service_account_from_dict(creds_info)
     spreadsheet = client.open_by_key(SHEET_ID)
     ws = spreadsheet.sheet1
     if ws.row_values(1) != HEADERS:
@@ -55,8 +52,7 @@ def _get_stats_sheet() -> gspread.Worksheet:
     if _stats_sheet is not None:
         return _stats_sheet
     creds_info  = json.loads(GOOGLE_CREDENTIALS_JSON)
-    creds       = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-    client      = gspread.authorize(creds)
+    client      = gspread.service_account_from_dict(creds_info)
     spreadsheet = client.open_by_key(SHEET_ID)
     try:
         ws = spreadsheet.worksheet("Statistics")
@@ -130,6 +126,9 @@ def _he(text) -> str:
 
 # ── Ma'lumot funksiyalari ──────────────────────────────────────────────────────
 
+# Global bot instance — record_user xatolarini adminga yuborish uchun
+_bot_instance = None
+
 def record_user(user, query: bool = False) -> None:
     try:
         uid    = str(user.id)
@@ -164,7 +163,16 @@ def record_user(user, query: bool = False) -> None:
                 ]],
             )
     except Exception as e:
-        print(f"[record_user xato] {e}")
+        msg = f"[record_user xato] {e}"
+        print(msg)
+        if _bot_instance and ADMIN_ID:
+            import asyncio
+            try:
+                asyncio.create_task(
+                    _bot_instance.send_message(chat_id=ADMIN_ID, text=f"⚠️ Sheets xato:\n<code>{msg}</code>", parse_mode="HTML")
+                )
+            except Exception:
+                pass
         return
     try:
         update_stats_sheet()
@@ -699,6 +707,8 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
 
+    global _bot_instance
+    _bot_instance = application.bot
     print("Bot ishga tushdi...")
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
