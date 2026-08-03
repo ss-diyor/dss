@@ -126,9 +126,6 @@ def _he(text) -> str:
 
 # ── Ma'lumot funksiyalari ──────────────────────────────────────────────────────
 
-# Global bot instance — record_user xatolarini adminga yuborish uchun
-_bot_instance = None
-
 def record_user(user, query: bool = False) -> None:
     try:
         uid    = str(user.id)
@@ -163,16 +160,7 @@ def record_user(user, query: bool = False) -> None:
                 ]],
             )
     except Exception as e:
-        msg = f"[record_user xato] {e}"
-        print(msg)
-        if _bot_instance and ADMIN_ID:
-            import asyncio
-            try:
-                asyncio.create_task(
-                    _bot_instance.send_message(chat_id=ADMIN_ID, text=f"⚠️ Sheets xato:\n<code>{msg}</code>", parse_mode="HTML")
-                )
-            except Exception:
-                pass
+        print(f"[record_user xato] {e}")
         return
     try:
         update_stats_sheet()
@@ -707,8 +695,6 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
 
-    global _bot_instance
-    _bot_instance = application.bot
     print("Bot ishga tushdi...")
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
