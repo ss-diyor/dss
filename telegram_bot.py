@@ -3,10 +3,9 @@ import json
 import asyncio
 import warnings
 from datetime import datetime, timezone, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ConversationHandler,
     filters, ContextTypes,
 )
 from telegram.warnings import PTBUserWarning
@@ -26,7 +25,6 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
            "first_seen", "last_seen", "query_count"]
 
 USERS_PER_PAGE = 20
-WAITING_REPLY  = 1
 
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
@@ -281,110 +279,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "Misol:\n`1234567`",
         parse_mode="Markdown",
     )
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✉️ Admin bilan bog'lanish", callback_data="contact_admin"),
-    ]])
-    await update.message.reply_text(
-        "\U0001f4d6 *Foydalanish:*\n\n"
-        "7 xonali abituriyent ID raqamini yuboring.\n"
-        "Misol: `6156306`\n\n"
-        "*Bot sizga ko'rsatadi:*\n"
-        "\u2022 \U0001f464 Ism\n"
-        "\u2022 \U0001f4ca To'plangan ball\n"
-        "\u2022 \U0001f4cc O'tdi / O'tmadi\n"
-        "\u2022 \U0001f3c6 Umumiy o'rin\n"
-        "\u2022 \U0001f4da Fanlar",
-        parse_mode="Markdown",
-        reply_markup=keyboard,
-    )
-
-
-async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.callback_query:
-        await update.callback_query.answer()
-        send = update.callback_query.message.reply_text
-    else:
-        send = update.message.reply_text
-    await send(
-        "✉️ Adminga yuboriladigan xabaringizni yozing:\n\n"
-        "Bekor qilish uchun /cancel yuboring.",
-    )
-    return WAITING_REPLY
-
-
-async def contact_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user  = update.effective_user
-    text  = update.message.text
-    first = user.first_name or ""
-    last  = user.last_name  or ""
-    full_name = _he((first + " " + last).strip() or "Noma'lum")
-    now   = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y %H:%M")
-
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("↩️ Javob berish", callback_data=f"reply:{user.id}"),
-    ]])
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            "✉️ <b>Yangi murojaat</b>\n\n"
-            f"👤 Ism: {full_name}\n"
-            f"🆔 Telegram ID: <code>{user.id}</code>\n"
-            f"🕐 Vaqt: {now}\n\n"
-            f"💬 Xabar:\n{_he(text)}"
-        ),
-        parse_mode="HTML",
-        reply_markup=keyboard,
-    )
-    await update.message.reply_text("✅ Xabaringiz adminga yuborildi. Tez orada javob beriladi.")
-    return ConversationHandler.END
-
-
-async def contact_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("❌ Murojaat bekor qilindi.")
-    return ConversationHandler.END
-
-
-async def admin_reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    if update.effective_user.id != ADMIN_ID:
-        return ConversationHandler.END
-    target_uid = query.data.split(":")[1]
-    context.user_data["reply_to"] = target_uid
-    await query.message.reply_text(
-        f"↩️ <code>{target_uid}</code> ga javobingizni yozing:\n\n"
-        "Bekor qilish uchun /cancel yuboring.",
-        parse_mode="HTML",
-    )
-    return WAITING_REPLY
-
-
-async def admin_reply_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    target_uid = context.user_data.get("reply_to")
-    if not target_uid:
-        await update.message.reply_text("⚠️ Xatolik: foydalanuvchi ID topilmadi.")
-        return ConversationHandler.END
-    try:
-        await context.bot.send_message(
-            chat_id=int(target_uid),
-            text=f"📩 <b>Admin javobi:</b>\n\n{_he(update.message.text)}",
-            parse_mode="HTML",
-        )
-        await update.message.reply_text("✅ Javob yuborildi.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Xatolik: {e}")
-    context.user_data.pop("reply_to", None)
-    return ConversationHandler.END
-
-
-async def admin_reply_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data.pop("reply_to", None)
-    await update.message.reply_text("❌ Javob bekor qilindi.")
-    return ConversationHandler.END
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -650,56 +544,12 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
 
-    # ── Guruh -1: Admin buyruqlari — ConversationHandler lardan OLDIN ishlaydi ──
-    # Bu yerda ro'yxatdan o'tganidan keyin, admin /contact yoki reply oqimida
-    # qolib ketsa ham /stats, /users va boshqa admin buyruqlari har doim ishlaydi
-    for _cmd, _fn in [
-        ("whoami",    whoami),
-        ("stats",     admin_stats),
-        ("users",     admin_users),
-        ("user",      admin_user),
-        ("broadcast", admin_broadcast),
-    ]:
-        application.add_handler(CommandHandler(_cmd, _fn), group=-1)
-
-    # ── Guruh 0: ConversationHandler lar va oddiy handlerlar ──────────────────
-    contact_conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("contact", contact_start),
-            CallbackQueryHandler(contact_start, pattern="^contact_admin$"),
-        ],
-        states={
-            WAITING_REPLY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, contact_receive),
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", contact_cancel)],
-    )
-
-    admin_reply_conv = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(admin_reply_start, pattern=r"^reply:\d+$"),
-        ],
-        states={
-            WAITING_REPLY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_reply_send),
-            ],
-        },
-        fallbacks=[
-            CommandHandler("cancel",    admin_reply_cancel),
-            CommandHandler("stats",     admin_stats),
-            CommandHandler("users",     admin_users),
-            CommandHandler("user",      admin_user),
-            CommandHandler("broadcast", admin_broadcast),
-            CommandHandler("whoami",    whoami),
-        ],
-        allow_reentry=True,
-    )
-
-    application.add_handler(contact_conv)
-    application.add_handler(admin_reply_conv)
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help",  help_command))
+    application.add_handler(CommandHandler("start",     start))
+    application.add_handler(CommandHandler("whoami",    whoami))
+    application.add_handler(CommandHandler("stats",     admin_stats))
+    application.add_handler(CommandHandler("users",     admin_users))
+    application.add_handler(CommandHandler("user",      admin_user))
+    application.add_handler(CommandHandler("broadcast", admin_broadcast))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
 
