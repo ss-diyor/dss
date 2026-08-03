@@ -66,24 +66,27 @@ def update_stats_sheet() -> None:
         records = _all_records()
         today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
 
-        total_users   = len(records)
+        # Faqat user_id mavjud bo'lgan satrlarni olamiz
+        valid_records = [r for r in records if str(r.get("user_id") or "").strip()]
+        total_users   = len(valid_records)
+        
         def _safe_int(v):
             try: return int(float(str(v or 0)))
             except: return 0
 
-        total_queries = sum(_safe_int(r.get("query_count")) for r in records)
+        total_queries = sum(_safe_int(r.get("query_count")) for r in valid_records)
 
         today_queries = sum(
             _safe_int(r.get("query_count"))
-            for r in records
+            for r in valid_records
             if str(r.get("last_seen") or "").startswith(today)
         )
         today_new_users = sum(
-            1 for r in records
+            1 for r in valid_records
             if str(r.get("first_seen") or "").startswith(today)
         )
 
-        top = max(records, key=lambda r: _safe_int(r.get("query_count")), default=None)
+        top = max(valid_records, key=lambda r: _safe_int(r.get("query_count")), default=None)
         if top:
             first  = top.get("first_name") or ""
             last_n = top.get("last_name")  or ""
@@ -141,6 +144,9 @@ def record_user(user, query: bool = False) -> None:
         row = _row_num(records, uid)
 
         if row is None:
+            # Yangi foydalanuvchini jadvalning haqiqiy oxiriga qo'shamiz
+            # append_row ba'zan bo'sh satrlardan keyin yozishi mumkin, 
+            # shuning uchun ehtiyotkorlik bilan ishlaymiz.
             sheet.append_row([
                 uid,
                 user.first_name or "",
@@ -150,7 +156,12 @@ def record_user(user, query: bool = False) -> None:
                 1 if query else 0,
             ])
         else:
-            existing = {str(r.get("user_id")): r for r in records}[uid]
+            # Agar bir xil UID li bir nechta satr bo'lsa, oxirgisini olamiz
+            user_map = {}
+            for r in records:
+                if str(r.get("user_id")):
+                    user_map[str(r["user_id"])] = r
+            existing = user_map[uid]
             try:
                 count = int(float(str(existing.get("query_count") or 0)))
             except:
@@ -179,16 +190,18 @@ def record_user(user, query: bool = False) -> None:
 
 def get_stats() -> dict:
     records = _all_records()
-    total_users   = len(records)
+    valid_records = [r for r in records if str(r.get("user_id") or "").strip()]
+    total_users   = len(valid_records)
+    
     def _safe_int(v):
         try: return int(float(str(v or 0)))
         except: return 0
 
-    total_queries = sum(_safe_int(r.get("query_count")) for r in records)
+    total_queries = sum(_safe_int(r.get("query_count")) for r in valid_records)
 
     last_seen = ""
-    if records:
-        latest = max(records, key=lambda r: str(r.get("last_seen") or ""))
+    if valid_records:
+        latest = max(valid_records, key=lambda r: str(r.get("last_seen") or ""))
         raw = latest.get("last_seen") or ""
         if raw:
             try:
@@ -202,7 +215,8 @@ def get_stats() -> dict:
 
 def get_users_page(page: int) -> tuple[list, int]:
     records = _all_records()
-    sorted_records = sorted(records, key=lambda r: str(r.get("first_seen") or ""), reverse=True)
+    valid_records = [r for r in records if str(r.get("user_id") or "").strip()]
+    sorted_records = sorted(valid_records, key=lambda r: str(r.get("first_seen") or ""), reverse=True)
     total = len(sorted_records)
     start = (page - 1) * USERS_PER_PAGE
     end   = start + USERS_PER_PAGE
