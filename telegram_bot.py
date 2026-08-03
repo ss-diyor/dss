@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import warnings
 from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -8,6 +9,10 @@ from telegram.ext import (
     CallbackQueryHandler, ConversationHandler,
     filters, ContextTypes,
 )
+from telegram.warnings import PTBUserWarning
+
+# per_message=False — bu oqim uchun to'g'ri tanlov (text reply + callback entry)
+warnings.filterwarnings("ignore", category=PTBUserWarning, message=".*per_message.*")
 import gspread
 from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
