@@ -11,7 +11,6 @@ from telegram.ext import (
 )
 from telegram.warnings import PTBUserWarning
 
-# per_message=False — bu oqim uchun to'g'ri tanlov (text reply + callback entry)
 warnings.filterwarnings("ignore", category=PTBUserWarning, message=".*per_message.*")
 import gspread
 from google.oauth2.service_account import Credentials
@@ -20,10 +19,7 @@ from scraper import get_student_data, get_total_count
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
-# Google Sheets sozlamalari
-# GOOGLE_CREDENTIALS_JSON — service account JSON (butun matn, bir qatorda)
-# SHEET_ID               — spreadsheet URL dagi uzun ID
-SHEET_ID               = os.getenv("SHEET_ID", "")
+SHEET_ID                = os.getenv("SHEET_ID", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 LOG_GROUP_ID            = os.getenv("LOG_GROUP_ID", "")
 
@@ -32,13 +28,11 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
            "first_seen", "last_seen", "query_count"]
 
 USERS_PER_PAGE = 20
-
-# ConversationHandler holati — admin javob yozayotgan payt
-WAITING_REPLY = 1
+WAITING_REPLY  = 1
 
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
-_sheet = None
+_sheet       = None
 _stats_sheet = None
 
 def _get_sheet() -> gspread.Worksheet:
@@ -46,26 +40,23 @@ def _get_sheet() -> gspread.Worksheet:
     if _sheet is not None:
         return _sheet
     creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
-    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-    client = gspread.authorize(creds)
+    creds      = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client     = gspread.authorize(creds)
     spreadsheet = client.open_by_key(SHEET_ID)
     ws = spreadsheet.sheet1
-    # Sarlavha qatori yo'q bo'lsa qo'shamiz
-    first_row = ws.row_values(1)
-    if first_row != HEADERS:
+    if ws.row_values(1) != HEADERS:
         ws.update(range_name="A1", values=[HEADERS])
     _sheet = ws
     return _sheet
 
 
 def _get_stats_sheet() -> gspread.Worksheet:
-    """'Statistics' varag'ini qaytaradi, yo'q bo'lsa yaratadi."""
     global _stats_sheet
     if _stats_sheet is not None:
         return _stats_sheet
-    creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
-    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-    client = gspread.authorize(creds)
+    creds_info  = json.loads(GOOGLE_CREDENTIALS_JSON)
+    creds       = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client      = gspread.authorize(creds)
     spreadsheet = client.open_by_key(SHEET_ID)
     try:
         ws = spreadsheet.worksheet("Statistics")
@@ -77,14 +68,12 @@ def _get_stats_sheet() -> gspread.Worksheet:
 
 
 def update_stats_sheet() -> None:
-    """Statistics varag'ini joriy ma'lumotlar bilan yangilaydi."""
     try:
         records = _all_records()
-        today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
+        today   = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
 
         total_users   = len(records)
         total_queries = sum(int(r.get("query_count") or 0) for r in records)
-
         today_queries = sum(
             int(r.get("query_count") or 0)
             for r in records
@@ -94,27 +83,24 @@ def update_stats_sheet() -> None:
             1 for r in records
             if str(r.get("first_seen", "")).startswith(today)
         )
-
         top = max(records, key=lambda r: int(r.get("query_count") or 0), default=None)
         if top:
             first  = top.get("first_name", "") or ""
             last_n = top.get("last_name",  "") or ""
             top_name  = (first + " " + last_n).strip() or "Noma'lum"
-            top_count = int(top.get("query_count") or 0)
-            top_str   = f"{top_name} ({top_count} ta)"
+            top_str   = f"{top_name} ({int(top.get('query_count') or 0)} ta)"
         else:
             top_str = "—"
 
-        ws = _get_stats_sheet()
-        ws.update(
+        _get_stats_sheet().update(
             range_name="A1",
             values=[
-                ["Ko'rsatkich",              "Qiymat"],
-                ["Jami foydalanuvchilar",    total_users],
-                ["Jami so'rovlar",           total_queries],
-                ["Bugungi so'rovlar",        today_queries],
+                ["Ko'rsatkich",                   "Qiymat"],
+                ["Jami foydalanuvchilar",          total_users],
+                ["Jami so'rovlar",                 total_queries],
+                ["Bugungi so'rovlar",              today_queries],
                 ["Bugungi yangi foydalanuvchilar", today_new_users],
-                ["Eng faol foydalanuvchi",   top_str],
+                ["Eng faol foydalanuvchi",         top_str],
             ],
         )
     except Exception as e:
@@ -126,15 +112,13 @@ def _all_records() -> list[dict]:
 
 
 def _row_num(records: list[dict], uid: str):
-    """Foydalanuvchi qaysi qatorda ekanini topa olsa qaytaradi (2-indexed), aks holda None."""
     for i, rec in enumerate(records):
         if str(rec.get("user_id")) == uid:
-            return i + 2   # 1 — header, 1 — 0-index farq
+            return i + 2
     return None
 
 
 def escape_md(text: str) -> str:
-    """Markdown v1 uchun maxsus belgilarni escape qilish."""
     text = str(text or "")
     for ch in ["\\", "*", "_", "`", "["]:
         text = text.replace(ch, "\\" + ch)
@@ -142,21 +126,19 @@ def escape_md(text: str) -> str:
 
 
 def _he(text) -> str:
-    """HTML parse_mode uchun xavfli belgilarni escape qilish."""
     return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 # ── Ma'lumot funksiyalari ──────────────────────────────────────────────────────
 
 def record_user(user, query: bool = False) -> None:
     try:
-        uid = str(user.id)
-        now = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d %H:%M:%S")
-        sheet = _get_sheet()
+        uid    = str(user.id)
+        now    = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d %H:%M:%S")
+        sheet   = _get_sheet()
         records = _all_records()
-        row = _row_num(records, uid)
+        row     = _row_num(records, uid)
 
         if row is None:
-            # Yangi foydalanuvchi — qo'shamiz
             sheet.append_row([
                 uid,
                 user.first_name or "",
@@ -166,9 +148,8 @@ def record_user(user, query: bool = False) -> None:
                 1 if query else 0,
             ])
         else:
-            # Mavjud foydalanuvchi — B:G ustunlarini yangilaymiz
             existing = {str(r.get("user_id")): r for r in records}[uid]
-            count = int(existing.get("query_count") or 0)
+            count    = int(existing.get("query_count") or 0)
             if query:
                 count += 1
             sheet.update(
@@ -192,26 +173,24 @@ def record_user(user, query: bool = False) -> None:
 
 
 def get_stats() -> dict:
-    records = _all_records()
+    records       = _all_records()
     total_users   = len(records)
     total_queries = sum(int(r.get("query_count") or 0) for r in records)
-
-    last_seen = ""
+    last_seen     = ""
     if records:
         latest = max(records, key=lambda r: r.get("last_seen", ""))
-        raw = latest.get("last_seen", "")
+        raw    = latest.get("last_seen", "")
         if raw:
             try:
-                dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+                dt        = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
                 last_seen = dt.strftime("%d.%m.%Y %H:%M")
             except ValueError:
                 last_seen = raw
-
     return {"total_users": total_users, "total_queries": total_queries, "last_seen": last_seen}
 
 
 def get_users_page(page: int) -> tuple[list, int]:
-    records = _all_records()
+    records        = _all_records()
     sorted_records = sorted(records, key=lambda r: r.get("first_seen", ""))
     total = len(sorted_records)
     start = (page - 1) * USERS_PER_PAGE
@@ -222,7 +201,7 @@ def get_users_page(page: int) -> tuple[list, int]:
 
 def format_result(d: dict) -> str:
     status_emoji = "\u2705" if d["is_pass"] else "\u274c"
-    name = escape_md(str(d.get("name") or ""))
+    name  = escape_md(str(d.get("name") or ""))
     lines = [
         f"\U0001f464 *{name}*",
         f"\U0001f194 ID: `{d['id']}`",
@@ -230,21 +209,11 @@ def format_result(d: dict) -> str:
         f"\U0001f4cc Holat: *{escape_md(str(d.get('pass_status') or ''))}* {status_emoji}",
     ]
     if d.get("rank"):
-        rank        = d["rank"]
-        total       = d.get("total_count")
-        page_link   = d.get("page_link")
-
-        if total:
-            pct      = round(rank / total * 100, 1)
-            rank_str = f"*{rank}-o'rin* (jami {total} ta abituriyent ichida) — top {pct}%"
-        else:
-            rank_str = f"*{rank}-o'rin*"
-
+        rank      = d["rank"]
+        page_link = d.get("page_link")
+        rank_str  = f"*{rank}-o'rin*"
         if page_link:
-            lines.append(
-                f"\U0001f3c6 Reytingda: {rank_str}"
-                f" \u2014 [Saytda ko'rish]({page_link})"
-            )
+            lines.append(f"\U0001f3c6 Reytingda: {rank_str} \u2014 [Saytda ko'rish]({page_link})")
         else:
             lines.append(f"\U0001f3c6 Reytingda: {rank_str}")
     subjects = []
@@ -258,7 +227,6 @@ def format_result(d: dict) -> str:
 # ── Guruh bildirishnomasi ─────────────────────────────────────────────────────
 
 async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
-    """Muvaffaqiyatli so'rovdan keyin log guruhiga xabar yuboradi."""
     if not LOG_GROUP_ID:
         return
     try:
@@ -268,7 +236,6 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
         username  = f"@{user.username}" if user.username else "yo'q"
         now       = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y %H:%M")
 
-        # Abituriyent ma'lumotlari
         student_name = _he(str(data.get("name") or "—"))
         score        = _he(str(data.get("score") or "—"))
         pass_status  = _he(str(data.get("pass_status") or "—"))
@@ -279,9 +246,7 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
         if data.get("s5subject"): subjects.append(_he(str(data["s5subject"])))
         subjects_str = " | ".join(subjects) if subjects else "—"
 
-        rank_str = ""
-        if data.get("rank"):
-            rank_str = f"\n🏆 O'rin: <b>{data['rank']}-o'rin</b>"
+        rank_str = f"\n🏆 O'rin: <b>{data['rank']}-o'rin</b>" if data.get("rank") else ""
 
         natija = (
             f"👤 Abituriyent: {student_name}\n"
@@ -296,8 +261,8 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
             f"🆔 Telegram ID: <code>{user.id}</code>\n"
             f"📱 Username: {_he(username)}\n"
             f"🔍 Qidirgan ID: <code>{_he(queried_id)}</code>\n"
-            f"🕐 Vaqt: {now}\n"
-            f"\n— <b>Natija</b> —\n"
+            f"🕐 Vaqt: {now}\n\n"
+            f"— <b>Natija</b> —\n"
             f"<tg-spoiler>{natija}</tg-spoiler>"
         )
         await bot.send_message(chat_id=int(LOG_GROUP_ID), text=text, parse_mode="HTML")
@@ -342,8 +307,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Foydalanuvchi /contact yozsa yoki tugmani bossa — xabar yozishga taklif."""
+async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
         send = update.callback_query.message.reply_text
@@ -357,19 +321,16 @@ async def contact_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def contact_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Foydalanuvchi xabarini qabul qilib adminga yuboradi."""
-    user = update.effective_user
-    text = update.message.text
-
-    first  = user.first_name or ""
-    last   = user.last_name  or ""
+    user  = update.effective_user
+    text  = update.message.text
+    first = user.first_name or ""
+    last  = user.last_name  or ""
     full_name = _he((first + " " + last).strip() or "Noma'lum")
-    now = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y %H:%M")
+    now   = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y %H:%M")
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("↩️ Javob berish", callback_data=f"reply:{user.id}"),
     ]])
-
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
@@ -382,10 +343,7 @@ async def contact_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         parse_mode="HTML",
         reply_markup=keyboard,
     )
-
-    await update.message.reply_text(
-        "✅ Xabaringiz adminga yuborildi. Tez orada javob beriladi."
-    )
+    await update.message.reply_text("✅ Xabaringiz adminga yuborildi. Tez orada javob beriladi.")
     return ConversationHandler.END
 
 
@@ -395,16 +353,12 @@ async def contact_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def admin_reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Admin 'Javob berish' tugmasini bosadi — foydalanuvchi ID sini saqlab javob kutadi."""
     query = update.callback_query
     await query.answer()
-
     if update.effective_user.id != ADMIN_ID:
         return ConversationHandler.END
-
     target_uid = query.data.split(":")[1]
     context.user_data["reply_to"] = target_uid
-
     await query.message.reply_text(
         f"↩️ <code>{target_uid}</code> ga javobingizni yozing:\n\n"
         "Bekor qilish uchun /cancel yuboring.",
@@ -414,23 +368,19 @@ async def admin_reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def admin_reply_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Admin yozgan javobni foydalanuvchiga yuboradi."""
     target_uid = context.user_data.get("reply_to")
     if not target_uid:
         await update.message.reply_text("⚠️ Xatolik: foydalanuvchi ID topilmadi.")
         return ConversationHandler.END
-
-    text = update.message.text
     try:
         await context.bot.send_message(
             chat_id=int(target_uid),
-            text=f"📩 <b>Admin javobi:</b>\n\n{_he(text)}",
+            text=f"📩 <b>Admin javobi:</b>\n\n{_he(update.message.text)}",
             parse_mode="HTML",
         )
         await update.message.reply_text("✅ Javob yuborildi.")
     except Exception as e:
         await update.message.reply_text(f"❌ Xatolik: {e}")
-
     context.user_data.pop("reply_to", None)
     return ConversationHandler.END
 
@@ -462,27 +412,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if result["status"] == "success":
         d = result["data"]
 
-        # 1-xabar: darhol natija (total_count siz)
         await update.message.reply_text(
             "\u2705 *Natija topildi:*\n\n" + format_result(d),
             parse_mode="Markdown",
         )
 
-        # Guruhga bildirishnoma — background task, foydalanuvchi kutmaydi
         asyncio.create_task(_notify_group(context.bot, update.effective_user, user_input, d))
 
-        # 2-xabar: jami hisoblanmoqda
         if d.get("rank") and d.get("page_number"):
             counting_msg = await update.message.reply_text(
                 "\u23f3 Jami abituriyentlar soni hisoblanmoqda..."
             )
-
             total = await asyncio.to_thread(
                 get_total_count,
                 d["page_number"], d["page_size"],
                 d.get("s4subject"), d.get("s5subject"), d.get("ed_lang_id"),
             )
-
             if total:
                 pct = round(d["rank"] / total * 100, 1)
                 await counting_msg.edit_text(
@@ -508,7 +453,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ── Admin handlers ────────────────────────────────────────────────────────────
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    uid = update.effective_user.id
+    uid      = update.effective_user.id
     is_admin = "Ha ✅" if uid == ADMIN_ID else "Yo'q ❌"
     await update.message.reply_text(
         f"Sizning ID: `{uid}`\n"
@@ -518,78 +463,12 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
-
-    if not context.args:
-        await update.message.reply_text(
-            "\U0001f464 *Foydalanish:*\n`/user <telegram_id>`\n\nMisol: `/user 123456789`",
-            parse_mode="Markdown",
-        )
-        return
-
-    target_uid = context.args[0].strip()
-    if not target_uid.isdigit():
-        await update.message.reply_text(
-            "\u26a0\ufe0f Telegram ID faqat raqamlardan iborat bo'lishi kerak.",
-        )
-        return
-
     try:
-        records = await asyncio.to_thread(_all_records)
-    except Exception as e:
-        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
-        return
-
-    rec = next((r for r in records if str(r.get("user_id")) == target_uid), None)
-
-    if rec is None:
-        await update.message.reply_text(
-            f"\u274c <code>{_he(target_uid)}</code> ID li foydalanuvchi topilmadi.",
-            parse_mode="HTML",
-        )
-        return
-
-    first  = rec.get("first_name", "") or ""
-    last_n = rec.get("last_name",  "") or ""
-    full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
-    username_str = _he(rec.get("username") or "yo'q")
-    query_count  = int(rec.get("query_count") or 0)
-
-    def fmt_dt(raw):
-        try:
-            dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
-            return dt.strftime("%d.%m.%Y %H:%M")
-        except (ValueError, TypeError):
-            return _he(raw) if raw else "—"
-
-    first_seen = fmt_dt(rec.get("first_seen", ""))
-    last_seen  = fmt_dt(rec.get("last_seen",  ""))
-
-    await update.message.reply_text(
-        f"\U0001f464 <b>Foydalanuvchi ma'lumotlari</b>\n\n"
-        f"\U0001f194 Telegram ID: <code>{_he(target_uid)}</code>\n"
-        f"\U0001f9d1 Ism: {full_name}\n"
-        f"\U0001f4f1 Username: {username_str}\n"
-        f"\U0001f50d Jami so'rovlar: <b>{query_count}</b> ta\n"
-        f"\U0001f4c5 Birinchi kirish: {first_seen}\n"
-        f"\U0001f550 So'nggi faollik: {last_seen}",
-        parse_mode="HTML",
-    )
-
-
-
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    uid = update.effective_user.id
-    print(f"[/stats] user_id={uid}, ADMIN_ID={ADMIN_ID}, match={uid == ADMIN_ID}")
-    if uid != ADMIN_ID:
-        await update.message.reply_text("\u26d4 Ruxsat yo'q.")
-        return
-
-    try:
-        s = await asyncio.to_thread(get_stats)
+        s    = await asyncio.to_thread(get_stats)
         last = s["last_seen"] if s["last_seen"] else "Hali yo'q"
         await update.message.reply_text(
             "\U0001f4ca *Statistika*\n\n"
@@ -599,130 +478,135 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             parse_mode="Markdown",
         )
     except Exception as e:
-        await update.message.reply_text(
-            f"\u274c *Sheets xatosi:*\n`{e}`",
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
 
 
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
-
     try:
         page = int(context.args[0]) if context.args else 1
-        if page < 1:
-            page = 1
+        if page < 1: page = 1
     except (ValueError, IndexError):
         page = 1
-
     try:
         users_slice, total = await asyncio.to_thread(get_users_page, page)
     except Exception as e:
-        await update.message.reply_text(
-            f"\u274c *Sheets xatosi:*\n`{e}`",
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
         return
-
     if total == 0:
         await update.message.reply_text("Hali hech kim foydalanmagan.")
         return
-
     total_pages = (total + USERS_PER_PAGE - 1) // USERS_PER_PAGE
-
     if page > total_pages:
         await update.message.reply_text(
-            f"\u26a0\ufe0f Sahifa mavjud emas. Jami {total_pages} ta sahifa bor.\n"
-            "Misol: /users 1"
+            f"\u26a0\ufe0f Sahifa mavjud emas. Jami {total_pages} ta sahifa bor.\nMisol: /users 1"
         )
         return
-
     start_num = (page - 1) * USERS_PER_PAGE + 1
-    lines = [
-        f"\U0001f465 <b>Foydalanuvchilar "
-        f"({start_num}-{start_num + len(users_slice) - 1} / {total}):</b>\n"
-    ]
-
+    lines = [f"\U0001f465 <b>Foydalanuvchilar ({start_num}-{start_num + len(users_slice) - 1} / {total}):</b>\n"]
     for i, u in enumerate(users_slice, start=start_num):
-        first  = u.get("first_name", "") or ""
-        last_n = u.get("last_name",  "") or ""
+        first        = u.get("first_name", "") or ""
+        last_n       = u.get("last_name",  "") or ""
         full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
         username_str = _he(u.get("username") or "username yo'q")
         count        = int(u.get("query_count") or 0)
-
-        raw_last = u.get("last_seen", "")
+        raw_last     = u.get("last_seen", "")
         try:
-            dt = datetime.strptime(raw_last, "%Y-%m-%d %H:%M:%S")
+            dt        = datetime.strptime(raw_last, "%Y-%m-%d %H:%M:%S")
             last_date = dt.strftime("%d.%m.%Y")
         except (ValueError, TypeError):
             last_date = (raw_last[:10] if raw_last else "\u2014")
-
-        lines.append(
-            f"{i}. {full_name} ({username_str})"
-            f" \u2014 {count} so'rov, oxirgi: {last_date}"
-        )
-
+        lines.append(f"{i}. {full_name} ({username_str}) \u2014 {count} so'rov, oxirgi: {last_date}")
     if total_pages > 1:
         if page < total_pages:
-            lines.append(
-                f"\n\U0001f4c4 Sahifa: {page}/{total_pages}"
-                f"  |  Keyingisi: /users {page + 1}"
-            )
+            lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}  |  Keyingisi: /users {page + 1}")
         else:
             lines.append(f"\n\U0001f4c4 Sahifa: {page}/{total_pages}")
-
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def admin_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("\u26d4 Ruxsat yo'q.")
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "\U0001f464 *Foydalanish:*\n`/user <telegram_id>`\n\nMisol: `/user 123456789`",
+            parse_mode="Markdown",
+        )
+        return
+    target_uid = context.args[0].strip()
+    if not target_uid.isdigit():
+        await update.message.reply_text("\u26a0\ufe0f Telegram ID faqat raqamlardan iborat bo'lishi kerak.")
+        return
+    try:
+        records = await asyncio.to_thread(_all_records)
+    except Exception as e:
+        await update.message.reply_text(f"\u274c *Sheets xatosi:*\n`{e}`", parse_mode="Markdown")
+        return
+    rec = next((r for r in records if str(r.get("user_id")) == target_uid), None)
+    if rec is None:
+        await update.message.reply_text(
+            f"\u274c <code>{_he(target_uid)}</code> ID li foydalanuvchi topilmadi.", parse_mode="HTML"
+        )
+        return
+    first        = rec.get("first_name", "") or ""
+    last_n       = rec.get("last_name",  "") or ""
+    full_name    = _he((first + " " + last_n).strip() or "Noma'lum")
+    username_str = _he(rec.get("username") or "yo'q")
+    query_count  = int(rec.get("query_count") or 0)
+
+    def fmt_dt(raw):
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y %H:%M")
+        except (ValueError, TypeError):
+            return _he(raw) if raw else "—"
+
+    await update.message.reply_text(
+        f"\U0001f464 <b>Foydalanuvchi ma'lumotlari</b>\n\n"
+        f"\U0001f194 Telegram ID: <code>{_he(target_uid)}</code>\n"
+        f"\U0001f9d1 Ism: {full_name}\n"
+        f"\U0001f4f1 Username: {username_str}\n"
+        f"\U0001f50d Jami so'rovlar: <b>{query_count}</b> ta\n"
+        f"\U0001f4c5 Birinchi kirish: {fmt_dt(rec.get('first_seen', ''))}\n"
+        f"\U0001f550 So'nggi faollik: {fmt_dt(rec.get('last_seen', ''))}",
+        parse_mode="HTML",
+    )
 
 
 async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
         return
-
     if not context.args:
         await update.message.reply_text(
-            "\U0001f4e2 *Broadcast foydalanish:*\n"
-            "`/broadcast <xabar matni>`\n\n"
-            "Markdown qo'llab-quvvatlanadi:\n"
-            "`*qalin*`  `_kursiv_`  `` `kod` ``",
+            "\U0001f4e2 *Broadcast foydalanish:*\n`/broadcast <xabar matni>`\n\n"
+            "Markdown qo'llab-quvvatlanadi:\n`*qalin*`  `_kursiv_`  `` `kod` ``",
             parse_mode="Markdown",
         )
         return
-
-    # context.args newline yo'qotadi, raw text dan olamiz
-    raw = update.message.text or ""
+    raw  = update.message.text or ""
     text = raw.split(None, 1)[1] if " " in raw or "\n" in raw else ""
-
     try:
         records = await asyncio.to_thread(_all_records)
     except Exception as e:
         await update.message.reply_text(f"\u274c Sheets xatosi:\n`{e}`", parse_mode="Markdown")
         return
-
     user_ids = [str(r.get("user_id")) for r in records if r.get("user_id")]
-
     if not user_ids:
         await update.message.reply_text("Hali foydalanuvchilar yo'q.")
         return
-
-    total = len(user_ids)
+    total      = len(user_ids)
     status_msg = await update.message.reply_text(f"\U0001f4e4 Yuborilmoqda... 0/{total}")
-
     success, blocked, failed = 0, [], []
-
     for i, uid in enumerate(user_ids, 1):
         try:
             try:
-                await context.bot.send_message(
-                    chat_id=int(uid),
-                    text=text,
-                    parse_mode="Markdown",
-                )
+                await context.bot.send_message(chat_id=int(uid), text=text, parse_mode="Markdown")
             except Exception as md_err:
                 if "can't parse" in str(md_err).lower():
-                    # Markdown xatosi — plain text sifatida qayta urinib ko'ramiz
                     await context.bot.send_message(chat_id=int(uid), text=text)
                 else:
                     raise
@@ -733,40 +617,29 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 blocked.append(uid)
             else:
                 failed.append(uid)
-
-        # Progress har 10 tadan
         if i % 10 == 0 or i == total:
             try:
                 await status_msg.edit_text(f"\U0001f4e4 Yuborilmoqda... {i}/{total}")
             except Exception:
                 pass
-
-        await asyncio.sleep(1)  # 1 xabar/sekund — xavfsiz tezlik
-
-    # ── Yakuniy hisobot ────────────────────────────────────────────────────────
-    lines = ["\U0001f4e2 *Broadcast yakunlandi*\n",
-             f"\u2705 Muvaffaqiyatli: *{success}* ta"]
-
+        await asyncio.sleep(1)
+    lines = ["\U0001f4e2 *Broadcast yakunlandi*\n", f"\u2705 Muvaffaqiyatli: *{success}* ta"]
     if blocked:
         lines.append(f"\U0001f6ab Bot blok qilgan: *{len(blocked)}* ta")
         preview = ", ".join(f"`{u}`" for u in blocked[:20])
-        if len(blocked) > 20:
-            preview += f" ... va yana {len(blocked) - 20} ta"
+        if len(blocked) > 20: preview += f" ... va yana {len(blocked) - 20} ta"
         lines.append(f"   {preview}")
-
     if failed:
         lines.append(f"\u26a0\ufe0f Boshqa xato: *{len(failed)}* ta")
         preview = ", ".join(f"`{u}`" for u in failed[:10])
-        if len(failed) > 10:
-            preview += f" ... va yana {len(failed) - 10} ta"
+        if len(failed) > 10: preview += f" ... va yana {len(failed) - 10} ta"
         lines.append(f"   {preview}")
-
     try:
         await status_msg.edit_text("\n".join(lines), parse_mode="Markdown")
     except Exception:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# ── Error handler ─────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     import os
@@ -776,19 +649,24 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         os._exit(1)
     print(f"[Xato] {context.error}")
 
+# ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
 
-    # Admin buyruqlari fallback uchun umumiy ro'yxat
-    _admin_fallbacks = [
-        CommandHandler("stats",     admin_stats),
-        CommandHandler("users",     admin_users),
-        CommandHandler("user",      admin_user),
-        CommandHandler("broadcast", admin_broadcast),
-    ]
+    # ── Guruh -1: Admin buyruqlari — ConversationHandler lardan OLDIN ishlaydi ──
+    # Bu yerda ro'yxatdan o'tganidan keyin, admin /contact yoki reply oqimida
+    # qolib ketsa ham /stats, /users va boshqa admin buyruqlari har doim ishlaydi
+    for _cmd, _fn in [
+        ("whoami",    whoami),
+        ("stats",     admin_stats),
+        ("users",     admin_users),
+        ("user",      admin_user),
+        ("broadcast", admin_broadcast),
+    ]:
+        application.add_handler(CommandHandler(_cmd, _fn), group=-1)
 
-    # Foydalanuvchi murojaati — /contact yoki inline tugma
+    # ── Guruh 0: ConversationHandler lar va oddiy handlerlar ──────────────────
     contact_conv = ConversationHandler(
         entry_points=[
             CommandHandler("contact", contact_start),
@@ -799,10 +677,9 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, contact_receive),
             ],
         },
-        fallbacks=[CommandHandler("cancel", contact_cancel)] + _admin_fallbacks,
+        fallbacks=[CommandHandler("cancel", contact_cancel)],
     )
 
-    # Admin javobi — inline "Javob berish" tugmasi
     admin_reply_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(admin_reply_start, pattern=r"^reply:\d+$"),
@@ -812,20 +689,16 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, admin_reply_send),
             ],
         },
-        fallbacks=[CommandHandler("cancel", admin_reply_cancel)] + _admin_fallbacks,
+        fallbacks=[CommandHandler("cancel", admin_reply_cancel)],
     )
 
     application.add_handler(contact_conv)
     application.add_handler(admin_reply_conv)
-    application.add_handler(CommandHandler("start",     start))
-    application.add_handler(CommandHandler("help",      help_command))
-    application.add_handler(CommandHandler("whoami",    whoami))
-    application.add_handler(CommandHandler("stats",     admin_stats))
-    application.add_handler(CommandHandler("users",     admin_users))
-    application.add_handler(CommandHandler("user",      admin_user))
-    application.add_handler(CommandHandler("broadcast", admin_broadcast))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help",  help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
+
     print("Bot ishga tushdi...")
     application.run_polling(
         allowed_updates=Update.ALL_TYPES,
