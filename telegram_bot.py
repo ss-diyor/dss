@@ -210,9 +210,36 @@ def _format_topic_name(s4subject: str, s5subject: str) -> str | None:
     return " | ".join(subjects)
 
 
+async def _load_existing_topics(bot) -> None:
+    """Load existing topics from the group into cache."""
+    global _topic_cache, _topics_checked
+    
+    if not LOG_GROUP_ID:
+        return
+    
+    try:
+        # Get all forum topics
+        topics = await bot.get_forum_topic_list(chat_id=int(LOG_GROUP_ID))
+        
+        for topic in topics:
+            topic_name = topic.name
+            topic_id = topic.message_thread_id
+            _topic_cache[topic_name] = topic_id
+            print(f"[_load_existing_topics] Loaded topic: {topic_name} (ID: {topic_id})")
+        
+        _topics_checked = True
+        print(f"[_load_existing_topics] Loaded {len(topics)} topics into cache")
+    except Exception as e:
+        print(f"[_load_existing_topics xato] {e}")
+
+
 async def _get_or_create_topic(bot, subject_combo: str) -> int | None:
     """Get existing topic ID or create new topic for subject combination."""
     global _topic_cache
+    
+    # Load existing topics if cache is empty
+    if not _topic_cache:
+        await _load_existing_topics(bot)
     
     # Check cache first
     if subject_combo in _topic_cache:
