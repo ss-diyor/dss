@@ -391,6 +391,14 @@ def get_users_page(page: int) -> tuple[list, int]:
 
 # ── Formatlash ────────────────────────────────────────────────────────────────
 
+ED_LANG = {"1": "O'zbek", "2": "Rus", "3": "Qoraqalpoq", "4": "Ingliz"}
+
+def _lang_name(ed_lang_id) -> str | None:
+    if not ed_lang_id:
+        return None
+    return ED_LANG.get(str(ed_lang_id), str(ed_lang_id))
+
+
 def format_result(d: dict) -> str:
     status_emoji = "\u2705" if d["is_pass"] else "\u274c"
     name = escape_md(str(d.get("name") or ""))
@@ -423,6 +431,9 @@ def format_result(d: dict) -> str:
     if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
     if subjects:
         lines.append(f"\U0001f4da Fanlar: {' | '.join(subjects)}")
+    lang = _lang_name(d.get("ed_lang_id"))
+    if lang:
+        lines.append(f"\U0001f5e3 Ta'lim tili: *{escape_md(lang)}*")
     lines.append("\n— @mandat\\_applicant\\_ratingbot orqali tekshirildi")
     return "\n".join(lines)
 
@@ -449,6 +460,8 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
         if data.get("s5subject"): subjects.append(_he(str(data["s5subject"])))
         subjects_str = " | ".join(subjects) if subjects else "—"
 
+        lang_str = _he(_lang_name(data.get("ed_lang_id")) or "—")
+
         rank_str = ""
         if data.get("rank"):
             rank_str = f"\n\U0001f3c6 O'rin: <b>{data['rank']}-o'rin</b>"
@@ -457,7 +470,8 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
             f"\U0001f464 Abituriyent: {student_name}\n"
             f"\U0001f4ca Ball: <b>{score}</b>\n"
             f"\U0001f4cc Holat: <b>{pass_status}</b> {status_emoji}\n"
-            f"\U0001f4da Fanlar: {subjects_str}"
+            f"\U0001f4da Fanlar: {subjects_str}\n"
+            f"\U0001f5e3 Ta'lim tili: <b>{lang_str}</b>"
             f"{rank_str}"
         )
         text = (
