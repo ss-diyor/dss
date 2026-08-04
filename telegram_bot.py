@@ -22,9 +22,9 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
 USERS_PER_PAGE = 15
 
 # ── Topic management ─────────────────────────────────────────────────────────────
-_topic_cache = {}      # Cache for topic IDs: {subject_combo: topic_id}
-_topics_checked = False # Flag to check if group has Topics enabled
-MAX_TOPICS = 50        # Maximum number of topics to create
+_topic_cache = {}        # Cache for topic IDs: {subject_combo: topic_id}
+_topics_loaded = False   # Flag: mavjud topiclar bir marta yuklandi
+MAX_TOPICS = 50          # Maximum number of topics to create
 
 # ── Sheets ulanishi ────────────────────────────────────────────────────────────
 
@@ -177,20 +177,22 @@ def _he(text) -> str:
 
 # ── Topic management functions ───────────────────────────────────────────────────
 
+_forum_enabled_cache: bool | None = None  # None = hali tekshirilmagan
+
 async def _check_forum_enabled(bot) -> bool:
     """Check if the log group has forum/Topics enabled."""
-    global _topics_checked
-    if _topics_checked:
-        return True
-    
+    global _forum_enabled_cache
+    if _forum_enabled_cache is not None:
+        return _forum_enabled_cache
+
     if not LOG_GROUP_ID:
+        _forum_enabled_cache = False
         return False
-    
+
     try:
         chat = await bot.get_chat(int(LOG_GROUP_ID))
-        is_forum = getattr(chat, 'is_forum', False)
-        _topics_checked = is_forum
-        return is_forum
+        _forum_enabled_cache = getattr(chat, 'is_forum', False)
+        return _forum_enabled_cache
     except Exception as e:
         print(f"[_check_forum_enabled xato] {e}")
         return False
@@ -211,58 +213,79 @@ def _format_topic_name(s4subject: str, s5subject: str) -> str | None:
 
 
 async def _load_existing_topics(bot) -> None:
-    """Load existing topics from the group into cache."""
-    global _topic_cache, _topics_checked
-    
-    if not LOG_GROUP_ID:
+    """Load existing topics from the group into cache (faqat bir marta chaqiriladi)."""
+    global _topic_cache, _topics_loaded
+
+    if _topics_loaded:
         return
-    
+
+    if not LOG_GROUP_ID:
+        _topics_loaded = True
+        return
+
     try:
-        # Get all forum topics
+        # Telegram get_forum_topic_list() ko'pi bilan oxirgi ~100 ta topicni qaytaradi.
+        # Shuning uchun natijani to'liq ishonchli deb hisoblab bo'lmaydi —
+        # lekin bu bot uchun MAX_TOPICS=50 bo'lgani uchun yetarli.
         topics = await bot.get_forum_topic_list(chat_id=int(LOG_GROUP_ID))
-        
+
         for topic in topics:
             topic_name = topic.name
             topic_id = topic.message_thread_id
             _topic_cache[topic_name] = topic_id
-            print(f"[_load_existing_topics] Loaded topic: {topic_name} (ID: {topic_id})")
-        
-        _topics_checked = True
-        print(f"[_load_existing_topics] Loaded {len(topics)} topics into cache")
+            print(f"[_load_existing_topics] Loaded: '{topic_name}' (ID: {topic_id})")
+
+        _topics_loaded = True
+        print(f"[_load_existing_topics] Jami {len(topics)} ta topic cache'ga yuklandi")
     except Exception as e:
         print(f"[_load_existing_topics xato] {e}")
+        # Xato bo'lsa ham _topics_loaded = True qilamiz —
+        # aks holda har bir so'rovda qayta urinadi va bot sekinlashadi.
+        _topics_loaded = True
 
 
 async def _get_or_create_topic(bot, subject_combo: str) -> int | None:
     """Get existing topic ID or create new topic for subject combination."""
     global _topic_cache
-    
-    # Load existing topics if cache is empty
-    if not _topic_cache:
-        await _load_existing_topics(bot)
-    
-    # Check cache first
-    if subject_combo in _topic_cache:
-        return _topic_cache[subject_combo]
-    
+
     if not LOG_GROUP_ID:
         return None
-    
+
+    # 1-qadam: mavjud topiclarni bir marta yukla (bot qayta ishga tushganda ham)
+    await _load_existing_topics(bot)
+
+    # 2-qadam: cache'da bor-yo'qligini tekshir
+    if subject_combo in _topic_cache:
+        print(f"[_get_or_create_topic] Cache'dan topildi: '{subject_combo}' (ID: {_topic_cache[subject_combo]})")
+        return _topic_cache[subject_combo]
+
+    # 3-qadam: limit tekshir
+    if len(_topic_cache) >= MAX_TOPICS:
+        print(f"[_get_or_create_topic] Topic limiti to'ldi ({MAX_TOPICS})")
+        return None
+
     try:
-        # Check if we've reached the topic limit
-        if len(_topic_cache) >= MAX_TOPICS:
-            print(f"[_get_or_create_topic] Topic limit reached ({MAX_TOPICS})")
-            return None
-        
-        # Create new topic
-        topic = await bot.create_forum_topic(
+        # 4-qadam: yangi topic yaratishdan OLDIN Telegram'dan qayta qidirish
+        # (agar _load_existing_topics API limiti tufayli to'liq kelmagan bo'lsa)
+        # Bu "double-check" dublikat yaratilishining oldini oladi.
+        fresh_topics = await bot.get_forum_topic_list(chat_id=int(LOG_GROUP_ID))
+        for topic in fresh_topics:
+            if topic.name not in _topic_cache:
+                _topic_cache[topic.name] = topic.message_thread_id
+            if topic.name == subject_combo:
+                print(f"[_get_or_create_topic] Yangi tekshiruvda topildi: '{subject_combo}' (ID: {topic.message_thread_id})")
+                return topic.message_thread_id
+
+        # 5-qadam: haqiqatan ham yo'q — yangi topic yarat
+        new_topic = await bot.create_forum_topic(
             chat_id=int(LOG_GROUP_ID),
             name=subject_combo
         )
-        topic_id = topic.message_thread_id
+        topic_id = new_topic.message_thread_id
         _topic_cache[subject_combo] = topic_id
-        print(f"[_get_or_create_topic] Created topic: {subject_combo} (ID: {topic_id})")
+        print(f"[_get_or_create_topic] Yangi topic yaratildi: '{subject_combo}' (ID: {topic_id})")
         return topic_id
+
     except Exception as e:
         print(f"[_get_or_create_topic xato] {e}")
         return None
