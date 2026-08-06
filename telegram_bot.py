@@ -144,10 +144,8 @@ def update_stats_sheet() -> None:
             "Bugungi eng faol foydalanuvchi"
         ]
         
-        # Check if headers need to be updated
-        current_headers = ws.row_values(1)
-        if current_headers != new_headers:
-            ws.update(range_name="A1", values=[new_headers])
+        # Har doim F1 sarlavhasini majburiy yangilash
+        ws.update(range_name="A1:F1", values=[new_headers])
         
         # Get all existing data
         all_data = ws.get_all_records(expected_headers=new_headers)
