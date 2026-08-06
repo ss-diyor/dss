@@ -17,7 +17,7 @@ LOG_GROUP_ID            = os.getenv("LOG_GROUP_ID", "")
 
 SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADERS = ["user_id", "first_name", "last_name", "username",
-           "first_seen", "last_seen", "query_count"]
+           "first_seen", "last_seen", "query_count", "is_blocked"]
 
 USERS_PER_PAGE = 15
 
@@ -311,12 +311,19 @@ def record_user(user, query: bool = False) -> None:
                 ("@" + user.username) if user.username else "",
                 now, now,
                 1 if query else 0,
+                "FALSE",
             ]
             # append_row o'rniga aniq oxirgi satrni aniqlab yozamiz
             # valid_records dan foydalanib haqiqiy oxirgi satrni topamiz
             valid_recs = [r for r in records if str(r.get("user_id") or "").strip()]
             next_row = len(valid_recs) + 2
-            sheet.update(range_name=f"A{next_row}:G{next_row}", values=[new_row])
+            sheet.update(range_name=f"A{next_row}:H{next_row}", values=[new_row])
+            try:
+                sheet.format(f"H{next_row}", {
+                    "backgroundColor": {"red": 0.85, "green": 0.93, "blue": 0.83}
+                })
+            except Exception:
+                pass
         else:
             # Mavjud foydalanuvchini yangilash
             user_map = {}
@@ -333,6 +340,7 @@ def record_user(user, query: bool = False) -> None:
                 count += 1
                 
             # A dan G gacha barcha ustunlarni yangilaymiz (user_id dan query_count gacha)
+            is_blocked = existing.get("is_blocked", "FALSE")
             updated_values = [
                 uid,
                 user.first_name or "",
@@ -341,9 +349,10 @@ def record_user(user, query: bool = False) -> None:
                 existing.get("first_seen", now),
                 now,
                 count,
+                is_blocked,
             ]
             sheet.update(
-                range_name=f"A{row}:G{row}",
+                range_name=f"A{row}:H{row}",
                 values=[updated_values],
             )
     except Exception as e:
@@ -827,6 +836,24 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 pass
 
         await asyncio.sleep(1)
+
+    # Broadcast tugadi — bloklangan foydalanuvchilarni batch qilib yangilash
+    if blocked:
+        try:
+            sheet = _get_sheet()
+            recs  = _all_records()
+            red_fmt = {
+                "backgroundColor": {
+                    "red": 0.96, "green": 0.80, "blue": 0.80
+                }
+            }
+            for uid in blocked:
+                row = _row_num(recs, uid)
+                if row:
+                    sheet.update(range_name=f"H{row}", values=[["TRUE"]])
+                    sheet.format(f"H{row}", red_fmt)
+        except Exception as e:
+            print(f"[batch is_blocked xato] {e}")
 
     lines = ["\U0001f4e2 *Broadcast yakunlandi*\n",
              f"\u2705 Muvaffaqiyatli: *{success}* ta"]
