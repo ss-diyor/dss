@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from datetime import datetime, timezone, timedelta
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import gspread
 from google.oauth2.service_account import Credentials
@@ -391,7 +391,7 @@ def get_users_page(page: int) -> tuple[list, int]:
 
 # ── Formatlash ────────────────────────────────────────────────────────────────
 
-ED_LANG = {"1": "O'zbek", "2": "Rus", "3": "Qoraqalpoq", "4": "Ingliz"}
+ED_LANG = {"1": "O'zbek", "2": "Rus", "3": "Qoraqalpoq", "4": "Tojik", "5": "Qozoq"}
 
 def _lang_name(ed_lang_id) -> str | None:
     if not ed_lang_id:
@@ -419,13 +419,7 @@ def format_result(d: dict) -> str:
         else:
             rank_str = f"*{rank}-o'rin*"
 
-        if page_link:
-            lines.append(
-                f"\U0001f3c6 Reytingda: {rank_str}"
-                f" \u2014 [Saytda ko'rish]({page_link})"
-            )
-        else:
-            lines.append(f"\U0001f3c6 Reytingda: {rank_str}")
+        lines.append(f"\U0001f3c6 Reytingda: {rank_str}")
     subjects = []
     if d.get("s4subject"): subjects.append(escape_md(str(d["s4subject"])))
     if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
@@ -546,9 +540,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if result["status"] == "success":
         d = result["data"]
 
+        reply_markup = None
+        if d.get("page_link"):
+            reply_markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🌐 Saytda ko'rish", url=d["page_link"])
+            ]])
+
         await update.message.reply_text(
             "\u2705 *Natija topildi:*\n\n" + format_result(d),
             parse_mode="Markdown",
+            reply_markup=reply_markup,
         )
 
         asyncio.create_task(_notify_group(context.bot, update.effective_user, user_input, d))
@@ -565,10 +566,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
 
             if total:
-                pct = round(d["rank"] / total * 100, 1)
+                rank    = d["rank"]
+                pct     = round(rank / total * 100, 1)
+                yuqori  = rank - 1
+                past    = total - rank
                 await counting_msg.edit_text(
                     f"\U0001f4ca Jami *{total}* ta abituriyent ichida "
-                    f"*{d['rank']}*-o'rin (top *{pct}%*)\n\n"
+                    f"*{rank}*-o'rin (top *{pct}%*)\n\n"
+                    f"\U0001f53c Sizdan yuqori: *{yuqori}* ta abituriyent\n"
+                    f"\U0001f53d Sizdan past: *{past}* ta abituriyent\n\n"
                     "— @mandat\\_applicant\\_ratingbot orqali tekshirildi",
                     parse_mode="Markdown",
                 )
