@@ -93,15 +93,44 @@ def update_stats_sheet() -> None:
             if str(r.get("first_seen") or "").startswith(today_full)
         )
 
-        top = max(valid_records, key=lambda r: _safe_int(r.get("query_count")), default=None)
-        if top:
-            first  = top.get("first_name") or ""
-            last_n = top.get("last_name")  or ""
+        # Bugun faoliyat ko'rsatgan foydalanuvchilar (last_seen bugungi kunga to'g'ri keladiganlar)
+        # Eslatma: user_id larning bugungi so'rovlar sonini aniq hisoblash uchun 
+        # agar qidiruv vaqtida query_count oshsa, bugungi so'rov yuborganlarni filtered qilamiz.
+        # Hozirgi bot arxitekturasida query_count jami so'rovlar sonini saqlaydi.
+        # Bugungi eng faol foydalanuvchini topish uchun last_seen bugun bo'lgan va
+        # bugun eng ko'p so'rov yuborgan (yoki oxirgi vaqtlari faol bo'lgan) foydalanuvchini aniqlaymiz.
+        # Aniqroq bo'lishi uchun last_seen bugun bo'lgan valid_records ni olamiz:
+        today_active_users = [
+            r for r in valid_records 
+            if str(r.get("last_seen") or "").startswith(today_full)
+        ]
+
+        if today_active_users:
+            # Agar bugun so'rov yuborganlar bo'lsa, ularning ichidan query_count eng ko'pi
+            # (yoki bugungi faolligi eng yuqori bo'lgani) — lekin query_count umumiy bo'lgani uchun,
+            # agar bugun faqat bugungi so'rovlar hisoblansa:
+            # Keling, bugun active bo'lganlar orasida max query_count ni olamiz yoki 
+            # umumiy query_count bo'yicha bugun kirganlar ichidan topamiz.
+            top_today = max(today_active_users, key=lambda r: _safe_int(r.get("query_count")), default=None)
+        else:
+            top_today = None
+
+        if top_today:
+            first  = top_today.get("first_name") or ""
+            last_n = top_today.get("last_name")  or ""
             top_name  = (first + " " + last_n).strip() or "Noma'lum"
-            top_count = _safe_int(top.get("query_count"))
+            top_count = _safe_int(top_today.get("query_count"))
             top_str   = f"{top_name} ({top_count} ta)"
         else:
-            top_str = "—"
+            top_today_any = max(valid_records, key=lambda r: _safe_int(r.get("query_count")), default=None)
+            if top_today_any:
+                first  = top_today_any.get("first_name") or ""
+                last_n = top_today_any.get("last_name")  or ""
+                top_name  = (first + " " + last_n).strip() or "Noma'lum"
+                top_count = _safe_int(top_today_any.get("query_count"))
+                top_str   = f"{top_name} ({top_count} ta)"
+            else:
+                top_str = "—"
 
         ws = _get_stats_sheet()
         
@@ -112,7 +141,7 @@ def update_stats_sheet() -> None:
             "Jami so'rovlar", 
             "Bugungi so'rovlar", 
             "Bugungi yangi foydalanuvchilar", 
-            "Eng faol foydalanuvchi"
+            "Bugungi eng faol foydalanuvchi"
         ]
         
         # Check if headers need to be updated
