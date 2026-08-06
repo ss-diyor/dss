@@ -340,7 +340,7 @@ def record_user(user, query: bool = False) -> None:
                 count += 1
                 
             # A dan G gacha barcha ustunlarni yangilaymiz (user_id dan query_count gacha)
-            is_blocked = existing.get("is_blocked", "FALSE")
+            is_blocked = existing.get("is_blocked") or "FALSE"
             updated_values = [
                 uid,
                 user.first_name or "",
