@@ -951,7 +951,7 @@ async def admin_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             except Exception:
                 df_stats = pd.DataFrame()
 
-            file_path = "/home/ubuntu/dss_users_export.xlsx"
+            file_path = "/tmp/dss_users_export.xlsx"
             with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
                 df.to_excel(writer, sheet_name="Foydalanuvchilar", index=False)
                 if not df_stats.empty:
