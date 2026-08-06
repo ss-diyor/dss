@@ -928,6 +928,51 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
 
 
+async def admin_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Ruxsat yo'q.")
+        return
+
+    status_msg = await update.message.reply_text("📥 Excel fayl tayyorlanmoqda... iltimos kuting.")
+
+    try:
+        import pandas as pd
+        import openpyxl
+
+        def generate_excel():
+            records = _all_records()
+            df = pd.DataFrame(records)
+            
+            # Statistics sheet records if available
+            try:
+                stats_ws = _get_stats_sheet()
+                stats_records = stats_ws.get_all_records()
+                df_stats = pd.DataFrame(stats_records)
+            except Exception:
+                df_stats = pd.DataFrame()
+
+            file_path = "/home/ubuntu/dss_users_export.xlsx"
+            with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name="Foydalanuvchilar", index=False)
+                if not df_stats.empty:
+                    df_stats.to_excel(writer, sheet_name="Statistika", index=False)
+            return file_path
+
+        file_path = await asyncio.to_thread(generate_excel)
+        
+        with open(file_path, "rb") as doc:
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=doc,
+                filename=f"bot_bazasi_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                caption="📊 *Bot bazasi va statistikasi Excel formatida tayyor!*",
+                parse_mode="Markdown"
+            )
+        await status_msg.delete()
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Xatolik yuz berdi:\n`{e}`", parse_mode="Markdown")
+
+
 async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("\u26d4 Ruxsat yo'q.")
@@ -1164,6 +1209,7 @@ def main() -> None:
     application.add_handler(CommandHandler("user",      admin_user))
     application.add_handler(CommandHandler("stats",     admin_stats))
     application.add_handler(CommandHandler("users",     admin_users))
+    application.add_handler(CommandHandler("export",    admin_export))
     application.add_handler(CommandHandler("broadcast", admin_broadcast))
     application.add_handler(CallbackQueryHandler(callback_query_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
