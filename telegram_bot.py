@@ -607,7 +607,7 @@ def get_user_recent_searches(uid: str) -> list[str]:
         print(f"[get_user_recent_searches xato] {e}")
         return []
 
-def get_user_saved_ids(uid: str) -> list[str]:
+def get_user_saved_items(uid: str) -> list[dict]:
     try:
         records = _all_records()
         user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
@@ -615,12 +615,26 @@ def get_user_saved_ids(uid: str) -> list[str]:
         saved_str = str(existing.get("saved_ids") or "").strip()
         if not saved_str:
             return []
-        return [i.strip() for i in saved_str.split(",") if i.strip().isdigit()]
+        items = []
+        for part in saved_str.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                i_id, i_name = part.split(":", 1)
+                i_id = i_id.strip()
+                i_name = i_name.strip()
+                if i_id.isdigit() and len(i_id) == 7:
+                    items.append({"id": i_id, "name": i_name})
+            else:
+                if part.isdigit() and len(part) == 7:
+                    items.append({"id": part, "name": part})
+        return items
     except Exception as e:
-        print(f"[get_user_saved_ids xato] {e}")
+        print(f"[get_user_saved_items xato] {e}")
         return []
 
-def add_user_saved_id(uid: str, new_id: str) -> list[str]:
+def add_user_saved_item(uid: str, new_id: str, name: str) -> list[dict]:
     try:
         sheet = _get_sheet()
         records = _all_records()
@@ -630,20 +644,34 @@ def add_user_saved_id(uid: str, new_id: str) -> list[str]:
         user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
         existing = user_map.get(uid, {})
         saved_str = str(existing.get("saved_ids") or "").strip()
-        saved = [i.strip() for i in saved_str.split(",") if i.strip().isdigit()]
-        if new_id not in saved:
-            saved.insert(0, new_id)
-            saved = saved[:5] # Max 5 saved IDs
-        new_saved_str = ",".join(saved)
-        # saved_ids is column K or L (let's check HEADERS index)
-        # HEADERS: user_id(A), first_name(B), last_name(C), username(D), first_seen(E), last_seen(E->F), query_count(G), is_blocked(H), last_id_1(I), last_id_2(J), last_id_3(K), saved_ids(L)
+        
+        items = []
+        for part in saved_str.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                i_id, i_name = part.split(":", 1)
+                i_id = i_id.strip()
+                i_name = i_name.strip()
+                if i_id.isdigit() and len(i_id) == 7:
+                    items.append({"id": i_id, "name": i_name})
+            else:
+                if part.isdigit() and len(part) == 7:
+                    items.append({"id": part, "name": part})
+        
+        items = [i for i in items if i["id"] != new_id]
+        items.insert(0, {"id": new_id, "name": name})
+        items = items[:5]
+        
+        new_saved_str = ",".join(f"{i['id']}:{i['name']}" for i in items)
         sheet.update(range_name=f"L{row}", values=[[new_saved_str]])
-        return saved
+        return items
     except Exception as e:
-        print(f"[add_user_saved_id xato] {e}")
+        print(f"[add_user_saved_item xato] {e}")
         return []
 
-def remove_user_saved_id(uid: str, target_id: str) -> list[str]:
+def remove_user_saved_item(uid: str, target_id: str) -> list[dict]:
     try:
         sheet = _get_sheet()
         records = _all_records()
@@ -653,19 +681,45 @@ def remove_user_saved_id(uid: str, target_id: str) -> list[str]:
         user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
         existing = user_map.get(uid, {})
         saved_str = str(existing.get("saved_ids") or "").strip()
-        saved = [i.strip() for i in saved_str.split(",") if i.strip().isdigit()]
-        if target_id in saved:
-            saved.remove(target_id)
-        new_saved_str = ",".join(saved)
+        
+        items = []
+        for part in saved_str.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                i_id, i_name = part.split(":", 1)
+                i_id = i_id.strip()
+                i_name = i_name.strip()
+                if i_id.isdigit() and len(i_id) == 7:
+                    items.append({"id": i_id, "name": i_name})
+            else:
+                if part.isdigit() and len(part) == 7:
+                    items.append({"id": part, "name": part})
+        
+        items = [i for i in items if i["id"] != target_id]
+        new_saved_str = ",".join(f"{i['id']}:{i['name']}" for i in items)
         sheet.update(range_name=f"L{row}", values=[[new_saved_str]])
-        return saved
+        return items
     except Exception as e:
-        print(f"[remove_user_saved_id xato] {e}")
+        print(f"[remove_user_saved_item xato] {e}")
         return []
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_input = update.message.text.strip()
     uid = str(update.effective_user.id)
+
+    pending_id = context.user_data.get("pending_save_id")
+    if pending_id:
+        context.user_data["pending_save_id"] = None
+        custom_name = user_input
+        saved_items = await asyncio.to_thread(add_user_saved_item, uid, pending_id, custom_name)
+        await update.message.reply_text(
+            f"⭐ ID <code>{pending_id}</code> («<b>{_he(custom_name)}</b>») saqlanganlarga qo'shildi!\n"
+            f"Jami saqlanganlar: {len(saved_items)} ta.",
+            parse_mode="HTML"
+        )
+        return
 
     if user_input == "🕒 Oxirgi qidiruvlar":
         recent = await asyncio.to_thread(get_user_recent_searches, uid)
@@ -681,11 +735,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if user_input == "⭐ Saqlangan ID lar":
-        saved = await asyncio.to_thread(get_user_saved_ids, uid)
-        if not saved:
-            await update.message.reply_text("⭐ Sizda saqlangan ID lar yo'q.\nID natijasi chiqqandan so'ng '⭐ Saqlash' tugmasi orqali saqlab qo'yishingiz mumkin.")
+        saved_items = await asyncio.to_thread(get_user_saved_items, uid)
+        if not saved_items:
+            await update.message.reply_text("⭐ Sizda saqlangan ID lar yo'q.\nID natijasi chiqqandan so'ng '⭐ Bu ID ni saqlash' tugmasi orqali saqlab qo'yishingiz mumkin.")
             return
-        buttons = [[InlineKeyboardButton(f"⭐ {i}", callback_data=f"search_{i}"), InlineKeyboardButton("❌ O'chirish", callback_data=f"unsave_{i}")] for i in saved]
+        buttons = [
+            [
+                InlineKeyboardButton(f"⭐ {item['name']} ({item['id']})", callback_data=f"search_{item['id']}"),
+                InlineKeyboardButton("❌ O'chirish", callback_data=f"unsave_{item['id']}")
+            ] 
+            for item in saved_items
+        ]
         await update.message.reply_text(
             "⭐ *Sizning saqlangan ID laringiz:*",
             parse_mode="Markdown",
@@ -1074,12 +1134,16 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     elif data.startswith("save_"):
         target_id = data.split("_")[1]
-        saved = await asyncio.to_thread(add_user_saved_id, uid, target_id)
-        await query.message.reply_text(f"⭐ ID <code>{target_id}</code> saqlanganlarga qo'shildi! Jami saqlanganlar: {len(saved)} ta.", parse_mode="HTML")
+        context.user_data["pending_save_id"] = target_id
+        await query.message.reply_text(
+            f"👤 ID <code>{target_id}</code> kimga tegishli?\n"
+            f"Iltimos, ushbu ID uchun ism/nom kiriting (masalan: <i>O'zim</i>, <i>Anvar</i>, <i>Akam</i>):",
+            parse_mode="HTML"
+        )
 
     elif data.startswith("unsave_"):
         target_id = data.split("_")[1]
-        saved = await asyncio.to_thread(remove_user_saved_id, uid, target_id)
+        saved_items = await asyncio.to_thread(remove_user_saved_item, uid, target_id)
         await query.message.reply_text(f"❌ ID <code>{target_id}</code> saqlanganlardan o'chirildi.", parse_mode="HTML")
 
 # ── main ──────────────────────────────────────────────────────────────────────
