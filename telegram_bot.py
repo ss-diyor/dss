@@ -17,7 +17,8 @@ LOG_GROUP_ID            = os.getenv("LOG_GROUP_ID", "")
 
 SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADERS = ["user_id", "first_name", "last_name", "username",
-           "first_seen", "last_seen", "query_count", "is_blocked"]
+           "first_seen", "last_seen", "query_count", "is_blocked",
+           "last_id_1", "last_id_2", "last_id_3"]
 
 USERS_PER_PAGE = 15
 
@@ -364,6 +365,32 @@ def record_user(user, query: bool = False) -> None:
         print(f"[update_stats_sheet xato] {e}")
 
 
+def update_user_searched_ids(uid: str, new_search_id: str) -> None:
+    try:
+        sheet = _get_sheet()
+        records = _all_records()
+        row = _row_num(records, uid)
+        if row is None:
+            return
+        
+        user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
+        existing = user_map.get(uid, {})
+        
+        old_1 = str(existing.get("last_id_1") or "").strip()
+        old_2 = str(existing.get("last_id_2") or "").strip()
+        
+        updated_id_1 = str(new_search_id)
+        updated_id_2 = old_1 if old_1 else ""
+        updated_id_3 = old_2 if old_2 else ""
+        
+        sheet.update(
+            range_name=f"I{row}:K{row}",
+            values=[[updated_id_1, updated_id_2, updated_id_3]]
+        )
+    except Exception as e:
+        print(f"[update_user_searched_ids xato] {e}")
+
+
 def get_stats() -> dict:
     records = _all_records()
     valid_records = [r for r in records if str(r.get("user_id") or "").strip()]
@@ -539,6 +566,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode="Markdown",
         )
         return
+
+    uid = str(update.effective_user.id)
+    asyncio.create_task(asyncio.to_thread(update_user_searched_ids, uid, user_input))
 
     asyncio.create_task(asyncio.to_thread(record_user, update.effective_user, True))
     await update.message.reply_text("\U0001f50d Qidirilmoqda... iltimos kuting.")
