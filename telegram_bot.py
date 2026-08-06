@@ -3,7 +3,7 @@ import json
 import asyncio
 from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import gspread
 from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
@@ -18,7 +18,7 @@ LOG_GROUP_ID            = os.getenv("LOG_GROUP_ID", "")
 SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
 HEADERS = ["user_id", "first_name", "last_name", "username",
            "first_seen", "last_seen", "query_count", "is_blocked",
-           "last_id_1", "last_id_2", "last_id_3"]
+           "last_id_1", "last_id_2", "last_id_3", "saved_ids"]
 
 USERS_PER_PAGE = 15
 
@@ -345,7 +345,7 @@ def record_user(user, query: bool = False) -> None:
             # valid_records dan foydalanib haqiqiy oxirgi satrni topamiz
             valid_recs = [r for r in records if str(r.get("user_id") or "").strip()]
             next_row = len(valid_recs) + 2
-            sheet.update(range_name=f"A{next_row}:H{next_row}", values=[new_row])
+            sheet.update(range_name=f"A{next_row}:L{next_row}", values=[new_row + ["", "", "", ""]])
             try:
                 sheet.format(f"H{next_row}", {
                     "backgroundColor": {"red": 0.85, "green": 0.93, "blue": 0.83}
@@ -565,30 +565,138 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
+from telegram import ReplyKeyboardMarkup, KeyboardButton
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
+    
+    reply_markup = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🕒 Oxirgi qidiruvlar"), KeyboardButton("⭐ Saqlangan ID lar")]
+        ],
+        resize_keyboard=True
+    )
+
     await update.message.reply_text(
-        "Assalomu alaykum, hurmatli abituriyent \U0001f44b\n\n"
+        "Assalomu alaykum, hurmatli abituriyent 👋\n\n"
         "Ushbu bot orqali siz quyidagilarni bilib olishingiz mumkin:\n\n"
-        "\U0001f4ca *To'plangan ball*\n"
-        "\U0001f4cc *O'tdi yoki o'tmadi* holati\n"
-        "\U0001f3c6 *Umumiy o'rin* — tanlangan fanlar bo'yicha barcha abituriyentlar ichida\n"
-        "\U0001f465 *Jami abituriyentlar soni* va *foiz* (top %)\n"
-        "\U0001f517 *Saytda ko'rish* — mandat.uzbmb.uz da aynan qaysi sahifada ekanligingiz\n\n"
-        "Shunchaki 7 xonali abituriyent ID raqamini yuboring.\n\n"
-        "Misol:\n`1234567`",
+        "📊 *To'plangan ball*\n"
+        "📌 *O'tdi yoki o'tmadi* holati\n"
+        "🏆 *Umumiy o'rin* — tanlangan fanlar bo'yicha barcha abituriyentlar ichida\n"
+        "👥 *Jami abituriyentlar soni* va *foiz* (top %)\n"
+        "🔗 *Saytda ko'rish* — mandat.uzbmb.uz da aynan qaysi sahifada ekanligingiz\n\n"
+        "Shunchaki 7 xonali abituriyent ID raqamini yuboring yoki pastdagi tugmalardan foydalaning.",
         parse_mode="Markdown",
+        reply_markup=reply_markup,
     )
 
 
 
+def get_user_recent_searches(uid: str) -> list[str]:
+    try:
+        records = _all_records()
+        user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
+        existing = user_map.get(uid, {})
+        ids = []
+        for key in ["last_id_1", "last_id_2", "last_id_3"]:
+            val = str(existing.get(key) or "").strip()
+            if val and val.isdigit() and len(val) == 7:
+                ids.append(val)
+        return ids
+    except Exception as e:
+        print(f"[get_user_recent_searches xato] {e}")
+        return []
+
+def get_user_saved_ids(uid: str) -> list[str]:
+    try:
+        records = _all_records()
+        user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
+        existing = user_map.get(uid, {})
+        saved_str = str(existing.get("saved_ids") or "").strip()
+        if not saved_str:
+            return []
+        return [i.strip() for i in saved_str.split(",") if i.strip().isdigit()]
+    except Exception as e:
+        print(f"[get_user_saved_ids xato] {e}")
+        return []
+
+def add_user_saved_id(uid: str, new_id: str) -> list[str]:
+    try:
+        sheet = _get_sheet()
+        records = _all_records()
+        row = _row_num(records, uid)
+        if row is None:
+            return []
+        user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
+        existing = user_map.get(uid, {})
+        saved_str = str(existing.get("saved_ids") or "").strip()
+        saved = [i.strip() for i in saved_str.split(",") if i.strip().isdigit()]
+        if new_id not in saved:
+            saved.insert(0, new_id)
+            saved = saved[:5] # Max 5 saved IDs
+        new_saved_str = ",".join(saved)
+        # saved_ids is column K or L (let's check HEADERS index)
+        # HEADERS: user_id(A), first_name(B), last_name(C), username(D), first_seen(E), last_seen(E->F), query_count(G), is_blocked(H), last_id_1(I), last_id_2(J), last_id_3(K), saved_ids(L)
+        sheet.update(range_name=f"L{row}", values=[[new_saved_str]])
+        return saved
+    except Exception as e:
+        print(f"[add_user_saved_id xato] {e}")
+        return []
+
+def remove_user_saved_id(uid: str, target_id: str) -> list[str]:
+    try:
+        sheet = _get_sheet()
+        records = _all_records()
+        row = _row_num(records, uid)
+        if row is None:
+            return []
+        user_map = {str(r.get("user_id")): r for r in records if str(r.get("user_id"))}
+        existing = user_map.get(uid, {})
+        saved_str = str(existing.get("saved_ids") or "").strip()
+        saved = [i.strip() for i in saved_str.split(",") if i.strip().isdigit()]
+        if target_id in saved:
+            saved.remove(target_id)
+        new_saved_str = ",".join(saved)
+        sheet.update(range_name=f"L{row}", values=[[new_saved_str]])
+        return saved
+    except Exception as e:
+        print(f"[remove_user_saved_id xato] {e}")
+        return []
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_input = update.message.text.strip()
+    uid = str(update.effective_user.id)
+
+    if user_input == "🕒 Oxirgi qidiruvlar":
+        recent = await asyncio.to_thread(get_user_recent_searches, uid)
+        if not recent:
+            await update.message.reply_text("Sizda hali qidiruvlar tarixi mavjud emas. 7 xonali ID yuborib qidiruvni boshlang.")
+            return
+        buttons = [[InlineKeyboardButton(f"🔍 {i}", callback_data=f"search_{i}")] for i in recent]
+        await update.message.reply_text(
+            "🕒 *Sizning oxirgi qidirgan ID laringiz:*\nQuyidagi ID lardan birini tanlab qayta tekshirishingiz mumkin:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return
+
+    if user_input == "⭐ Saqlangan ID lar":
+        saved = await asyncio.to_thread(get_user_saved_ids, uid)
+        if not saved:
+            await update.message.reply_text("⭐ Sizda saqlangan ID lar yo'q.\nID natijasi chiqqandan so'ng '⭐ Saqlash' tugmasi orqali saqlab qo'yishingiz mumkin.")
+            return
+        buttons = [[InlineKeyboardButton(f"⭐ {i}", callback_data=f"search_{i}"), InlineKeyboardButton("❌ O'chirish", callback_data=f"unsave_{i}")] for i in saved]
+        await update.message.reply_text(
+            "⭐ *Sizning saqlangan ID laringiz:*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return
 
     if not (user_input.isdigit() and len(user_input) == 7):
         asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
         await update.message.reply_text(
-            "\u26a0\ufe0f Iltimos, *7 xonali* abituriyent ID raqamini kiriting.\n"
+            "⚠️ Iltimos, *7 xonali* abituriyent ID raqamini kiriting.\n"
             "Misol: `6156306`",
             parse_mode="Markdown",
         )
@@ -606,11 +714,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if result["status"] == "success":
         d = result["data"]
 
-        reply_markup = None
+        buttons = []
         if d.get("page_link"):
-            reply_markup = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🌐 Saytda ko'rish", url=d["page_link"])
-            ]])
+            buttons.append([InlineKeyboardButton("🌐 Saytda ko'rish", url=d["page_link"])])
+        buttons.append([InlineKeyboardButton("⭐ Bu ID ni saqlash", callback_data=f"save_{user_input}")])
+        reply_markup = InlineKeyboardMarkup(buttons)
 
         await update.message.reply_text(
             "\u2705 *Natija topildi:*\n\n" + format_result(d),
@@ -934,6 +1042,46 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+
+async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    uid = str(query.from_user.id)
+
+    if data.startswith("search_"):
+        target_id = data.split("_")[1]
+        await query.message.reply_text(f"🔍 <b>{target_id}</b> qidirilmoqda...", parse_mode="HTML")
+        
+        asyncio.create_task(asyncio.to_thread(update_user_searched_ids, uid, target_id))
+        asyncio.create_task(asyncio.to_thread(record_user, query.from_user, True))
+
+        res = get_student_data(target_id)
+        if res["status"] == "success":
+            d = res["data"]
+            buttons = []
+            if d.get("page_link"):
+                buttons.append([InlineKeyboardButton("🌐 Saytda ko'rish", url=d["page_link"])])
+            buttons.append([InlineKeyboardButton("⭐ Bu ID ni saqlash", callback_data=f"save_{target_id}")])
+            await query.message.reply_text(
+                "✅ *Natija topildi:*\n\n" + format_result(d),
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+            asyncio.create_task(_notify_group(context.bot, query.from_user, target_id, d))
+        else:
+            await query.message.reply_text("❌ Ushbu ID bo'yicha ma'lumot topilmadi.")
+
+    elif data.startswith("save_"):
+        target_id = data.split("_")[1]
+        saved = await asyncio.to_thread(add_user_saved_id, uid, target_id)
+        await query.message.reply_text(f"⭐ ID <code>{target_id}</code> saqlanganlarga qo'shildi! Jami saqlanganlar: {len(saved)} ta.", parse_mode="HTML")
+
+    elif data.startswith("unsave_"):
+        target_id = data.split("_")[1]
+        saved = await asyncio.to_thread(remove_user_saved_id, uid, target_id)
+        await query.message.reply_text(f"❌ ID <code>{target_id}</code> saqlanganlardan o'chirildi.", parse_mode="HTML")
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -953,6 +1101,7 @@ def main() -> None:
     application.add_handler(CommandHandler("stats",     admin_stats))
     application.add_handler(CommandHandler("users",     admin_users))
     application.add_handler(CommandHandler("broadcast", admin_broadcast))
+    application.add_handler(CallbackQueryHandler(callback_query_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
     print("Bot ishga tushdi...")
