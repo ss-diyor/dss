@@ -115,7 +115,6 @@ body{
         <div class="stat"><span class="key">total_queries</span><span class="value primary" id="queries">...</span></div>
         <div class="stat"><span class="key">today_queries</span><span class="value" id="today">...</span></div>
         <div class="stat"><span class="key">vs_yesterday</span><span class="value" id="yesterdayComparison">...</span></div>
-        <div class="stat"><span class="key">daily_active_users</span><span class="value" id="dau">...</span></div>
         <div class="stat"><span class="key">new_users_today</span><span class="value" id="newusers">...</span></div>
         <div class="stat"><span class="key">queries_7d</span><span class="value" id="queries7d">...</span></div>
         <div class="stat"><span class="key">queries_30d</span><span class="value" id="queries30d">...</span></div>
@@ -248,7 +247,6 @@ function buildCopyText(){
     `Total users: ${fmt(get(x,["Jami foydalanuvchilar","total_users","users"]))}`,
     `Total queries: ${fmt(get(x,["Jami so'rovlar","total_queries","queries"]))}`,
     `Today queries: ${fmt(get(x,["Bugungi so'rovlar","today_queries","todayQueries"]))}`,
-    `DAU: ${fmt(get(x,["Bugungi faol foydalanuvchilar","DAU","daily_active_users","activeUsers"]))}`,
     `New users today: ${fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]))}`,
     `7D queries: ${fmt(sumLast(history,7))}`,
     `30D queries: ${fmt(sumLast(history,30))}`,
@@ -304,7 +302,6 @@ function render(data){
   el("users").textContent=fmt(get(x,["Jami foydalanuvchilar","total_users","users"]));
   el("queries").textContent=fmt(get(x,["Jami so'rovlar","total_queries","queries"]));
   el("today").textContent=fmt(get(x,["Bugungi so'rovlar","today_queries","todayQueries"]));
-  el("dau").textContent=fmt(get(x,["Bugungi faol foydalanuvchilar","DAU","daily_active_users","activeUsers"]));
   el("newusers").textContent=fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]));
 
   const history=Array.isArray(data.history)?data.history:[];
