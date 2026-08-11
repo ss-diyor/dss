@@ -39,6 +39,47 @@ body{
 .gap{height:16px}.gap-sm{height:8px}
 @media(max-width:700px){body{padding:12px}.content{padding:18px 15px}.stats{grid-template-columns:1fr}.history-row{grid-template-columns:86px 1fr 64px}}
 @media(max-width:420px){.live{display:none}.titlebar{grid-template-columns:auto 1fr}.title{justify-self:end}.line,.key,.value{font-size:12px}}
+
+.actions{
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px
+}
+.refresh-btn{
+  appearance:none;border:1px solid #2f3742;background:#11161c;color:var(--mint);
+  font:600 12px "JetBrains Mono",monospace;padding:8px 12px;border-radius:6px;
+  cursor:pointer;transition:.15s ease
+}
+.refresh-btn:hover{background:#151b22;border-color:#3a4653}
+.refresh-btn:disabled{opacity:.55;cursor:not-allowed}
+.runtime{
+  display:flex;flex-wrap:wrap;gap:14px;color:var(--muted);font-size:12px
+}
+.runtime strong{color:#9da7b3;font-weight:600}
+
+.heatmap-wrap{margin-top:18px}
+.heatmap-head{
+  display:flex;justify-content:space-between;gap:10px;align-items:center;
+  margin-bottom:10px;color:var(--yellow);font-size:12px
+}
+.heatmap{
+  display:grid;
+  grid-template-columns:repeat(30, minmax(8px,1fr));
+  gap:4px;
+}
+.heat-cell{
+  aspect-ratio:1/1;
+  border-radius:2px;
+  border:1px solid #1d232b;
+  background:#12171d;
+}
+.heat-1{background:#0e4429}
+.heat-2{background:#006d32}
+.heat-3{background:#26a641}
+.heat-4{background:#39d353}
+.heatmap-empty{color:var(--muted);font-size:12px}
+@media(max-width:700px){
+  .heatmap{grid-template-columns:repeat(15,minmax(8px,1fr))}
+}
+
 </style>
 </head>
 <body>
@@ -63,6 +104,9 @@ body{
         <div class="stat"><span class="key">today_queries</span><span class="value" id="today">...</span></div>
         <div class="stat"><span class="key">daily_active_users</span><span class="value" id="dau">...</span></div>
         <div class="stat"><span class="key">new_users_today</span><span class="value" id="newusers">...</span></div>
+        <div class="stat"><span class="key">queries_7d</span><span class="value" id="queries7d">...</span></div>
+        <div class="stat"><span class="key">queries_30d</span><span class="value" id="queries30d">...</span></div>
+        <div class="stat"><span class="key">peak_day</span><span class="value" id="peakday">...</span></div>
       </div>
 
       <div class="history">
@@ -70,11 +114,23 @@ body{
         <div id="history">Loading history...</div>
       </div>
 
+      <div class="heatmap-wrap">
+        <div class="heatmap-head"><span>activity_heatmap</span><span>last 30 days</span></div>
+        <div class="heatmap" id="heatmap"><span class="heatmap-empty">Loading activity...</span></div>
+      </div>
+
       <hr class="divider">
       <div class="meta">
         <div>status: <span id="status" class="warn">connecting...</span></div>
         <div>last_update: <span id="updated">loading...</span></div>
-        <div>refresh: every 60 seconds</div>
+      </div>
+
+      <div class="actions">
+        <button class="refresh-btn" id="refreshBtn" type="button">[ refresh ]</button>
+        <div class="runtime">
+          <span><strong>next_refresh:</strong> <span id="nextRefresh">60s</span></span>
+          <span><strong>api_latency:</strong> <span id="latency">—</span></span>
+        </div>
       </div>
     </div>
     <div class="gap"></div>
@@ -111,6 +167,52 @@ function renderHistory(rows){
   }).join("");
 }
 
+function dailyQueryValue(row){
+  return Number(get(row,["todayQueries","Bugungi so'rovlar","today_queries"],0))||0;
+}
+
+function dateValue(row){
+  return get(row,["date","Sana"],"—");
+}
+
+function sumLast(rows, days){
+  if(!Array.isArray(rows)) return 0;
+  return rows.slice(-days).reduce((sum,row)=>sum+dailyQueryValue(row),0);
+}
+
+function getPeakDay(rows){
+  if(!Array.isArray(rows)||!rows.length) return {date:"—", value:0};
+  let peak={date:"—",value:-1};
+  rows.forEach(row=>{
+    const value=dailyQueryValue(row);
+    if(value>peak.value) peak={date:dateValue(row),value};
+  });
+  return peak.value<0?{date:"—",value:0}:peak;
+}
+
+function renderHeatmap(rows){
+  const box=el("heatmap");
+  if(!Array.isArray(rows)||!rows.length){
+    box.innerHTML='<span class="heatmap-empty">No activity history yet.</span>';
+    return;
+  }
+  const recent=rows.slice(-30);
+  const vals=recent.map(dailyQueryValue);
+  const max=Math.max(...vals,1);
+
+  box.innerHTML=recent.map((row,i)=>{
+    const v=vals[i];
+    const ratio=v/max;
+    let level=0;
+    if(v>0 && ratio<=.25) level=1;
+    else if(ratio<=.5 && v>0) level=2;
+    else if(ratio<=.75 && v>0) level=3;
+    else if(v>0) level=4;
+
+    return `<div class="heat-cell ${level?`heat-${level}`:""}" title="${esc(dateValue(row))}: ${fmt(v)} queries"></div>`;
+  }).join("");
+}
+
 function render(data){
   const x=(data.latest && typeof data.latest==="object")?data.latest:data;
   el("users").textContent=fmt(get(x,["Jami foydalanuvchilar","total_users","users"]));
@@ -118,27 +220,80 @@ function render(data){
   el("today").textContent=fmt(get(x,["Bugungi so'rovlar","today_queries","todayQueries"]));
   el("dau").textContent=fmt(get(x,["Bugungi faol foydalanuvchilar","DAU","daily_active_users","activeUsers"]));
   el("newusers").textContent=fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]));
+
+  const history=Array.isArray(data.history)?data.history:[];
+  el("queries7d").textContent=fmt(sumLast(history,7));
+  el("queries30d").textContent=fmt(sumLast(history,30));
+
+  const peak=getPeakDay(history);
+  el("peakday").textContent=peak.date==="—"?"—":`${peak.date} (${fmt(peak.value)})`;
+
   el("updated").textContent=get(x,["Sana","date"],new Date().toLocaleString("uz-UZ"));
-  renderHistory(data.history);
+  renderHistory(history);
+  renderHeatmap(history);
+}
+
+let nextRefreshAt=Date.now()+REFRESH_MS;
+let isLoading=false;
+
+function resetCountdown(){
+  nextRefreshAt=Date.now()+REFRESH_MS;
+}
+
+function updateCountdown(){
+  const remaining=Math.max(0,Math.ceil((nextRefreshAt-Date.now())/1000));
+  el("nextRefresh").textContent=`${remaining}s`;
 }
 
 async function load(){
-  el("status").className="warn";el("status").textContent="connecting...";
+  if(isLoading) return;
+  isLoading=true;
+  const btn=el("refreshBtn");
+  btn.disabled=true;
+  btn.textContent="[ refreshing... ]";
+
+  el("status").className="warn";
+  el("status").textContent="connecting...";
+
+  const started=performance.now();
+
   try{
     const r=await fetch(API_URL,{cache:"no-store"});
+    const latency=Math.round(performance.now()-started);
+    el("latency").textContent=`${latency}ms`;
+
     if(!r.ok) throw new Error("HTTP "+r.status);
+
     const data=await r.json();
     if(data.status && data.status!=="success") throw new Error(data.message||data.status);
+
     render(data);
-    el("status").className="ok";el("status").textContent="connected";
-    el("live").textContent="● ONLINE";el("live").style.color="";
+    el("status").className="ok";
+    el("status").textContent="connected";
+    el("live").textContent="● ONLINE";
+    el("live").style.color="";
   }catch(err){
     console.error(err);
-    el("status").className="error";el("status").textContent="connection_failed";
-    el("live").textContent="● OFFLINE";el("live").style.color="#ff7b72";
+    el("latency").textContent="error";
+    el("status").className="error";
+    el("status").textContent="connection_failed";
+    el("live").textContent="● OFFLINE";
+    el("live").style.color="#ff7b72";
+  }finally{
+    isLoading=false;
+    btn.disabled=false;
+    btn.textContent="[ refresh ]";
+    resetCountdown();
+    updateCountdown();
   }
 }
-window.addEventListener("DOMContentLoaded",()=>{load();setInterval(load,REFRESH_MS)});
+
+window.addEventListener("DOMContentLoaded",()=>{
+  el("refreshBtn").addEventListener("click",load);
+  load();
+  setInterval(updateCountdown,1000);
+  setInterval(load,REFRESH_MS);
+});
 </script>
 </body>
 </html>
