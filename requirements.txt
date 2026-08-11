@@ -5,3 +5,5 @@ gspread
 google-auth
 pandas
 openpyxl
+Flask
+waitress
