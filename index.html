@@ -80,6 +80,18 @@ body{
   .heatmap{grid-template-columns:repeat(15,minmax(8px,1fr))}
 }
 
+
+.copy-btn{
+  appearance:none;border:1px solid #2f3742;background:#11161c;color:var(--blue);
+  font:600 12px "JetBrains Mono",monospace;padding:8px 12px;border-radius:6px;
+  cursor:pointer;transition:.15s ease
+}
+.copy-btn:hover{background:#151b22;border-color:#3a4653}
+.copy-btn.copied{color:var(--green);border-color:#2f6f3e}
+.comparison-up{color:var(--green)!important}
+.comparison-down{color:#ff7b72!important}
+.comparison-flat{color:var(--muted)!important}
+.shortcut{color:#626b76;font-size:11px}
 </style>
 </head>
 <body>
@@ -102,6 +114,7 @@ body{
         <div class="stat"><span class="key">total_users</span><span class="value primary" id="users">...</span></div>
         <div class="stat"><span class="key">total_queries</span><span class="value primary" id="queries">...</span></div>
         <div class="stat"><span class="key">today_queries</span><span class="value" id="today">...</span></div>
+        <div class="stat"><span class="key">vs_yesterday</span><span class="value" id="yesterdayComparison">...</span></div>
         <div class="stat"><span class="key">daily_active_users</span><span class="value" id="dau">...</span></div>
         <div class="stat"><span class="key">new_users_today</span><span class="value" id="newusers">...</span></div>
         <div class="stat"><span class="key">queries_7d</span><span class="value" id="queries7d">...</span></div>
@@ -127,6 +140,8 @@ body{
 
       <div class="actions">
         <button class="refresh-btn" id="refreshBtn" type="button">[ refresh ]</button>
+        <button class="copy-btn" id="copyBtn" type="button">[ copy stats ]</button>
+        <span class="shortcut">shortcut: R = refresh</span>
         <div class="runtime">
           <span><strong>next_refresh:</strong> <span id="nextRefresh">60s</span></span>
           <span><strong>api_latency:</strong> <span id="latency">—</span></span>
@@ -188,6 +203,77 @@ function getPeakDay(rows){
     if(value>peak.value) peak={date:dateValue(row),value};
   });
   return peak.value<0?{date:"—",value:0}:peak;
+}
+
+let latestPayload=null;
+
+function renderYesterdayComparison(rows){
+  const target=el("yesterdayComparison");
+  if(!Array.isArray(rows) || rows.length < 2){
+    target.textContent="—";
+    target.className="value comparison-flat";
+    return;
+  }
+  const today=dailyQueryValue(rows[rows.length-1]);
+  const yesterday=dailyQueryValue(rows[rows.length-2]);
+
+  if(yesterday===0){
+    if(today===0){
+      target.textContent="0%";
+      target.className="value comparison-flat";
+    }else{
+      target.textContent=`+${fmt(today)} vs 0`;
+      target.className="value comparison-up";
+    }
+    return;
+  }
+
+  const pct=((today-yesterday)/yesterday)*100;
+  const rounded=Math.round(pct*10)/10;
+  const sign=rounded>0?"+":"";
+  target.textContent=`${sign}${rounded}%`;
+  target.className="value " + (rounded>0?"comparison-up":rounded<0?"comparison-down":"comparison-flat");
+}
+
+function buildCopyText(){
+  if(!latestPayload) return "";
+  const data=latestPayload;
+  const x=(data.latest && typeof data.latest==="object")?data.latest:data;
+  const history=Array.isArray(data.history)?data.history:[];
+  renderYesterdayComparison(history);
+  const peak=getPeakDay(history);
+
+  return [
+    "ARB Analytics Console",
+    `Total users: ${fmt(get(x,["Jami foydalanuvchilar","total_users","users"]))}`,
+    `Total queries: ${fmt(get(x,["Jami so'rovlar","total_queries","queries"]))}`,
+    `Today queries: ${fmt(get(x,["Bugungi so'rovlar","today_queries","todayQueries"]))}`,
+    `DAU: ${fmt(get(x,["Bugungi faol foydalanuvchilar","DAU","daily_active_users","activeUsers"]))}`,
+    `New users today: ${fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]))}`,
+    `7D queries: ${fmt(sumLast(history,7))}`,
+    `30D queries: ${fmt(sumLast(history,30))}`,
+    `Peak day: ${peak.date==="—"?"—":`${peak.date} (${fmt(peak.value)})`}`,
+    `Updated: ${get(x,["Sana","date"],new Date().toLocaleString("uz-UZ"))}`
+  ].join("\\n");
+}
+
+async function copyStats(){
+  const button=el("copyBtn");
+  const value=buildCopyText();
+  if(!value) return;
+  try{
+    await navigator.clipboard.writeText(value);
+    button.textContent="[ copied ✓ ]";
+    button.classList.add("copied");
+    setTimeout(()=>{
+      button.textContent="[ copy stats ]";
+      button.classList.remove("copied");
+    },1800);
+  }catch(err){
+    console.error("Clipboard error:",err);
+    button.textContent="[ copy failed ]";
+    setTimeout(()=>button.textContent="[ copy stats ]",1800);
+  }
 }
 
 function renderHeatmap(rows){
@@ -267,6 +353,7 @@ async function load(){
     const data=await r.json();
     if(data.status && data.status!=="success") throw new Error(data.message||data.status);
 
+    latestPayload=data;
     render(data);
     el("status").className="ok";
     el("status").textContent="connected";
@@ -290,6 +377,16 @@ async function load(){
 
 window.addEventListener("DOMContentLoaded",()=>{
   el("refreshBtn").addEventListener("click",load);
+  el("copyBtn").addEventListener("click",copyStats);
+
+  document.addEventListener("keydown",(event)=>{
+    const tag=(document.activeElement?.tagName||"").toLowerCase();
+    const typing=tag==="input" || tag==="textarea" || document.activeElement?.isContentEditable;
+    if(!typing && event.key.toLowerCase()==="r" && !event.ctrlKey && !event.metaKey && !event.altKey){
+      event.preventDefault();
+      load();
+    }
+  });
   load();
   setInterval(updateCountdown,1000);
   setInterval(load,REFRESH_MS);
