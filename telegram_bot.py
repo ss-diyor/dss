@@ -1,6 +1,11 @@
 import os
 import json
 import asyncio
+import threading
+import time
+from pathlib import Path
+from flask import Flask, jsonify, send_from_directory
+from waitress import serve
 from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -21,6 +26,87 @@ HEADERS = ["user_id", "first_name", "last_name", "username",
            "last_id_1", "last_id_2", "last_id_3", "saved_ids"]
 
 USERS_PER_PAGE = 15
+
+# ── Mini statistics website ───────────────────────────────────────────────────
+
+WEB_DIR = Path(__file__).resolve().parent
+web_app = Flask(__name__, static_folder=None)
+_stats_api_cache = {"data": None, "ts": 0.0}
+STATS_API_CACHE_TTL = 60
+
+
+def _stats_history_payload() -> dict:
+    """Statistics worksheet ma'lumotlarini public dashboard uchun tayyorlaydi."""
+    now = time.time()
+    cached = _stats_api_cache.get("data")
+    if cached is not None and now - float(_stats_api_cache.get("ts", 0)) < STATS_API_CACHE_TTL:
+        return cached
+
+    ws = _get_stats_sheet()
+    records = ws.get_all_records()
+
+    def safe_int(value):
+        try:
+            return int(float(str(value or 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    history = []
+    for row in records:
+        date = str(row.get("Sana") or "").strip()
+        if not date:
+            continue
+        history.append({
+            "date": date,
+            "totalUsers": safe_int(row.get("Jami foydalanuvchilar")),
+            "totalQueries": safe_int(row.get("Jami so'rovlar")),
+            "todayQueries": safe_int(row.get("Bugungi so'rovlar")),
+            "newUsers": safe_int(row.get("Bugungi yangi foydalanuvchilar")),
+        })
+
+    latest = history[-1] if history else {
+        "date": "—",
+        "totalUsers": 0,
+        "totalQueries": 0,
+        "todayQueries": 0,
+        "newUsers": 0,
+    }
+
+    payload = {
+        "ok": True,
+        "latest": latest,
+        "history": history[-60:],
+        "updatedAt": datetime.now(tz=timezone(timedelta(hours=5))).isoformat(),
+    }
+    _stats_api_cache["data"] = payload
+    _stats_api_cache["ts"] = now
+    return payload
+
+
+@web_app.get("/")
+def dashboard():
+    return send_from_directory(WEB_DIR, "index.html")
+
+
+@web_app.get("/api/stats")
+def api_stats():
+    try:
+        response = jsonify(_stats_history_payload())
+        response.headers["Cache-Control"] = "public, max-age=30"
+        return response
+    except Exception as e:
+        return jsonify({"ok": False, "error": "Statistikani yuklab bo'lmadi"}), 500
+
+
+@web_app.get("/health")
+def health():
+    return jsonify({"ok": True, "service": "telegram-bot-dashboard"})
+
+
+def run_web_server() -> None:
+    port = int(os.getenv("PORT", "10000"))
+    serve(web_app, host="0.0.0.0", port=port, threads=4)
+
 
 # ── Topic management ─────────────────────────────────────────────────────────────
 _topic_cache = {}        # Cache for topic IDs: {subject_combo: topic_id}
@@ -1203,6 +1289,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def main() -> None:
+    web_thread = threading.Thread(target=run_web_server, name="stats-web", daemon=True)
+    web_thread.start()
+    print(f"Web dashboard ishga tushdi: PORT={os.getenv('PORT', '10000')}")
+
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start",     start))
     application.add_handler(CommandHandler("whoami",    whoami))
