@@ -63,7 +63,6 @@ body{
         <div class="stat"><span class="key">today_queries</span><span class="value" id="today">...</span></div>
         <div class="stat"><span class="key">daily_active_users</span><span class="value" id="dau">...</span></div>
         <div class="stat"><span class="key">new_users_today</span><span class="value" id="newusers">...</span></div>
-        <div class="stat"><span class="key">top_user_today</span><span class="value" id="topuser">...</span></div>
       </div>
 
       <div class="history">
@@ -119,7 +118,6 @@ function render(data){
   el("today").textContent=fmt(get(x,["Bugungi so'rovlar","today_queries","todayQueries"]));
   el("dau").textContent=fmt(get(x,["Bugungi faol foydalanuvchilar","DAU","daily_active_users","activeUsers"]));
   el("newusers").textContent=fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]));
-  el("topuser").textContent=get(x,["Bugungi eng faol foydalanuvchi","top_user_today","topUser"]);
   el("updated").textContent=get(x,["Sana","date"],new Date().toLocaleString("uz-UZ"));
   renderHistory(data.history);
 }
