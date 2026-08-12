@@ -93,6 +93,137 @@ body{
 .comparison-down{color:#ff7b72!important}
 .comparison-flat{color:var(--muted)!important}
 .shortcut{color:#626b76;font-size:11px}
+
+/* PNG export card */
+.export-stage{
+  position:fixed;
+  left:-10000px;
+  top:0;
+  width:900px;
+  pointer-events:none;
+  z-index:-1;
+}
+.export-card{
+  width:900px;
+  aspect-ratio:3/4;
+  background:
+    radial-gradient(circle at top right, rgba(78,201,176,.12), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(121,192,255,.10), transparent 32%),
+    linear-gradient(180deg, #0b0f14 0%, #0a0d12 100%);
+  color:var(--text);
+  border:1px solid #202833;
+  border-radius:28px;
+  padding:46px;
+  display:flex;
+  flex-direction:column;
+  gap:22px;
+  box-shadow:0 30px 90px rgba(0,0,0,.35);
+}
+.export-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:16px;
+}
+.export-brand{
+  display:grid;
+  gap:8px;
+}
+.export-kicker{
+  color:var(--mint);
+  font-size:18px;
+  letter-spacing:.18em;
+  font-weight:700;
+}
+.export-title{
+  font-size:44px;
+  line-height:1.05;
+  color:var(--yellow);
+  font-weight:700;
+}
+.export-subtitle{
+  color:#8b949e;
+  font-size:16px;
+  line-height:1.6;
+}
+.export-badge{
+  border:1px solid #1f6f46;
+  color:#8ff0a4;
+  background:rgba(63,185,80,.10);
+  padding:10px 16px;
+  border-radius:999px;
+  font-size:16px;
+  font-weight:700;
+}
+.export-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:14px;
+}
+.export-metric{
+  background:rgba(15,19,25,.9);
+  border:1px solid #202833;
+  border-radius:18px;
+  padding:20px 22px;
+}
+.export-label{
+  color:var(--blue);
+  font-size:15px;
+  margin-bottom:12px;
+}
+.export-value{
+  color:var(--text);
+  font-size:34px;
+  line-height:1.1;
+  font-weight:700;
+}
+.export-value.small{
+  font-size:26px;
+}
+.export-section-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  color:var(--yellow);
+  font-size:18px;
+  font-weight:700;
+  margin-top:4px;
+}
+.export-heatmap{
+  display:grid;
+  grid-template-columns:repeat(10, 1fr);
+  gap:8px;
+}
+.export-heat-cell{
+  aspect-ratio:1/1;
+  border-radius:6px;
+  border:1px solid #1d232b;
+  background:#12171d;
+}
+.export-heat-1{background:#0e4429}
+.export-heat-2{background:#006d32}
+.export-heat-3{background:#26a641}
+.export-heat-4{background:#39d353}
+.export-footer{
+  margin-top:auto;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:20px;
+  padding-top:20px;
+  border-top:1px dashed #27303a;
+}
+.export-footer-note{
+  color:#8b949e;
+  font-size:14px;
+  line-height:1.7;
+}
+.export-signature{
+  color:var(--mint);
+  font-size:16px;
+  font-weight:700;
+}
+
 </style>
 </head>
 <body>
@@ -153,6 +284,70 @@ body{
   </div>
 </section>
 </main>
+
+
+<div class="export-stage">
+  <div class="export-card" id="exportCard">
+    <div class="export-top">
+      <div class="export-brand">
+        <div class="export-kicker">ARB • ANALYTICS</div>
+        <div class="export-title">Statistics Snapshot</div>
+        <div class="export-subtitle">Applicant Rating Bot monitoring card<br>Generated from live dashboard metrics</div>
+      </div>
+      <div class="export-badge">LIVE</div>
+    </div>
+
+    <div class="export-grid">
+      <div class="export-metric">
+        <div class="export-label">total_users</div>
+        <div class="export-value" id="expUsers">—</div>
+      </div>
+      <div class="export-metric">
+        <div class="export-label">total_queries</div>
+        <div class="export-value" id="expQueries">—</div>
+      </div>
+      <div class="export-metric">
+        <div class="export-label">today_queries</div>
+        <div class="export-value" id="expToday">—</div>
+      </div>
+      <div class="export-metric">
+        <div class="export-label">vs_yesterday</div>
+        <div class="export-value small" id="expYesterday">—</div>
+      </div>
+      <div class="export-metric">
+        <div class="export-label">new_users_today</div>
+        <div class="export-value" id="expNewUsers">—</div>
+      </div>
+      <div class="export-metric">
+        <div class="export-label">peak_day</div>
+        <div class="export-value small" id="expPeak">—</div>
+      </div>
+      <div class="export-metric">
+        <div class="export-label">queries_7d</div>
+        <div class="export-value" id="expQ7">—</div>
+      </div>
+      <div class="export-metric">
+        <div class="export-label">queries_30d</div>
+        <div class="export-value" id="expQ30">—</div>
+      </div>
+    </div>
+
+    <div class="export-section-head">
+      <span>30-day activity</span>
+      <span id="expUpdatedSmall">updated —</span>
+    </div>
+
+    <div class="export-heatmap" id="exportHeatmap"></div>
+
+    <div class="export-footer">
+      <div class="export-footer-note">
+        <div>Source: Google Sheets / Apps Script API</div>
+        <div id="expUpdated">Last update: —</div>
+      </div>
+      <div class="export-signature">sultanov.space</div>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
@@ -236,10 +431,77 @@ function renderYesterdayComparison(rows){
   target.className="value " + (rounded>0?"comparison-up":rounded<0?"comparison-down":"comparison-flat");
 }
 
+
+function getYesterdayComparisonText(rows){
+  if(!Array.isArray(rows) || rows.length < 2) return "—";
+  const today=dailyQueryValue(rows[rows.length-1]);
+  const yesterday=dailyQueryValue(rows[rows.length-2]);
+
+  if(yesterday===0){
+    return today===0 ? "0%" : `+${fmt(today)} vs 0`;
+  }
+  const pct=((today-yesterday)/yesterday)*100;
+  const rounded=Math.round(pct*10)/10;
+  const sign=rounded>0?"+":"";
+  return `${sign}${rounded}%`;
+}
+
+function renderExportHeatmap(rows){
+  const box=el("exportHeatmap");
+  if(!box) return;
+  if(!Array.isArray(rows) || !rows.length){
+    box.innerHTML="";
+    return;
+  }
+
+  const recent=rows.slice(-30);
+  const vals=recent.map(dailyQueryValue);
+  const max=Math.max(...vals,1);
+
+  box.innerHTML=recent.map((row,i)=>{
+    const v=vals[i];
+    const ratio=v/max;
+    let level=0;
+    if(v>0 && ratio<=.25) level=1;
+    else if(ratio<=.5 && v>0) level=2;
+    else if(ratio<=.75 && v>0) level=3;
+    else if(v>0) level=4;
+
+    return `<div class="export-heat-cell ${level?`export-heat-${level}`:""}"></div>`;
+  }).join("");
+}
+
+function populateExportCard(){
+  if(!latestPayload) return false;
+
+  const data=latestPayload;
+  const x=(data.latest && typeof data.latest==="object")?data.latest:data;
+  const history=Array.isArray(data.history)?data.history:[];
+  const peak=getPeakDay(history);
+  const updated=get(x,["Sana","date"],new Date().toLocaleString("uz-UZ"));
+
+  el("expUsers").textContent=fmt(get(x,["Jami foydalanuvchilar","total_users","users"]));
+  el("expQueries").textContent=fmt(get(x,["Jami so'rovlar","total_queries","queries"]));
+  el("expToday").textContent=fmt(get(x,["Bugungi so'rovlar","today_queries","todayQueries"]));
+  el("expYesterday").textContent=getYesterdayComparisonText(history);
+  el("expNewUsers").textContent=fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]));
+  el("expQ7").textContent=fmt(sumLast(history,7));
+  el("expQ30").textContent=fmt(sumLast(history,30));
+  el("expPeak").textContent=peak.date==="—" ? "—" : `${peak.date} (${fmt(peak.value)})`;
+  el("expUpdated").textContent=`Last update: ${updated}`;
+  el("expUpdatedSmall").textContent=`updated ${updated}`;
+
+  renderExportHeatmap(history);
+  return true;
+}
+
 async function downloadStatsCard(){
   const button=el("downloadBtn");
-  const card=document.querySelector(".output");
+  const card=document.getElementById("exportCard");
   if(!card || typeof html2canvas === "undefined") return;
+
+  const ready=populateExportCard();
+  if(!ready) return;
 
   const oldText=button.textContent;
   try{
@@ -247,7 +509,7 @@ async function downloadStatsCard(){
     button.textContent="[ rendering... ]";
 
     const canvas = await html2canvas(card, {
-      backgroundColor: "#0d1014",
+      backgroundColor: null,
       scale: 2,
       useCORS: true
     });
@@ -255,7 +517,7 @@ async function downloadStatsCard(){
     const link=document.createElement("a");
     const now=new Date();
     const stamp=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}_${String(now.getHours()).padStart(2,"0")}-${String(now.getMinutes()).padStart(2,"0")}`;
-    link.download=`arb_analytics_${stamp}.png`;
+    link.download=`arb_analytics_card_${stamp}.png`;
     link.href=canvas.toDataURL("image/png");
     link.click();
 
