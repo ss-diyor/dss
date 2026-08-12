@@ -87,6 +87,7 @@ body{
   cursor:pointer;transition:.15s ease
 }
 .download-btn:hover{background:#151b22;border-color:#3a4653}
+.download-btn:disabled{opacity:.55;cursor:not-allowed}
 .download-btn.downloaded{color:var(--green);border-color:#2f6f3e}
 .comparison-up{color:var(--green)!important}
 .comparison-down{color:#ff7b72!important}
@@ -139,7 +140,7 @@ body{
 
       <div class="actions">
         <button class="refresh-btn" id="refreshBtn" type="button">[ refresh ]</button>
-        <button class="copy-btn" id="downloadBtn" type="button">[ download card ]</button>
+        <button class="download-btn" id="downloadBtn" type="button">[ download card ]</button>
         <span class="shortcut">shortcut: R = refresh</span>
         <div class="runtime">
           <span><strong>next_refresh:</strong> <span id="nextRefresh">60s</span></span>
@@ -273,7 +274,7 @@ async function downloadStatsCard(){
   }
 }
 
-function renderHeatmap(rows){function renderHeatmap(rows){
+function renderHeatmap(rows){
   const box=el("heatmap");
   if(!Array.isArray(rows)||!rows.length){
     box.innerHTML='<span class="heatmap-empty">No activity history yet.</span>';
