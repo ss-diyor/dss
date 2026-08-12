@@ -81,13 +81,13 @@ body{
 }
 
 
-.copy-btn{
+.download-btn{
   appearance:none;border:1px solid #2f3742;background:#11161c;color:var(--blue);
   font:600 12px "JetBrains Mono",monospace;padding:8px 12px;border-radius:6px;
   cursor:pointer;transition:.15s ease
 }
-.copy-btn:hover{background:#151b22;border-color:#3a4653}
-.copy-btn.copied{color:var(--green);border-color:#2f6f3e}
+.download-btn:hover{background:#151b22;border-color:#3a4653}
+.download-btn.downloaded{color:var(--green);border-color:#2f6f3e}
 .comparison-up{color:var(--green)!important}
 .comparison-down{color:#ff7b72!important}
 .comparison-flat{color:var(--muted)!important}
@@ -139,7 +139,7 @@ body{
 
       <div class="actions">
         <button class="refresh-btn" id="refreshBtn" type="button">[ refresh ]</button>
-        <button class="copy-btn" id="copyBtn" type="button">[ copy stats ]</button>
+        <button class="copy-btn" id="downloadBtn" type="button">[ download card ]</button>
         <span class="shortcut">shortcut: R = refresh</span>
         <div class="runtime">
           <span><strong>next_refresh:</strong> <span id="nextRefresh">60s</span></span>
@@ -153,6 +153,7 @@ body{
 </section>
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 const API_URL="https://script.google.com/macros/s/AKfycbxJFmdAGu4xTbvCIjkZrEzKWxngNc_tGBuaNbxZAanan99JGO4yev4XURVzvcq5R3nd/exec";
 const REFRESH_MS=60000;
@@ -234,47 +235,45 @@ function renderYesterdayComparison(rows){
   target.className="value " + (rounded>0?"comparison-up":rounded<0?"comparison-down":"comparison-flat");
 }
 
-function buildCopyText(){
-  if(!latestPayload) return "";
-  const data=latestPayload;
-  const x=(data.latest && typeof data.latest==="object")?data.latest:data;
-  const history=Array.isArray(data.history)?data.history:[];
-  renderYesterdayComparison(history);
-  const peak=getPeakDay(history);
+async function downloadStatsCard(){
+  const button=el("downloadBtn");
+  const card=document.querySelector(".output");
+  if(!card || typeof html2canvas === "undefined") return;
 
-  return [
-    "ARB Analytics Console",
-    `Total users: ${fmt(get(x,["Jami foydalanuvchilar","total_users","users"]))}`,
-    `Total queries: ${fmt(get(x,["Jami so'rovlar","total_queries","queries"]))}`,
-    `Today queries: ${fmt(get(x,["Bugungi so'rovlar","today_queries","todayQueries"]))}`,
-    `New users today: ${fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]))}`,
-    `7D queries: ${fmt(sumLast(history,7))}`,
-    `30D queries: ${fmt(sumLast(history,30))}`,
-    `Peak day: ${peak.date==="—"?"—":`${peak.date} (${fmt(peak.value)})`}`,
-    `Updated: ${get(x,["Sana","date"],new Date().toLocaleString("uz-UZ"))}`
-  ].join("\\n");
-}
-
-async function copyStats(){
-  const button=el("copyBtn");
-  const value=buildCopyText();
-  if(!value) return;
+  const oldText=button.textContent;
   try{
-    await navigator.clipboard.writeText(value);
-    button.textContent="[ copied ✓ ]";
-    button.classList.add("copied");
+    button.disabled=true;
+    button.textContent="[ rendering... ]";
+
+    const canvas = await html2canvas(card, {
+      backgroundColor: "#0d1014",
+      scale: 2,
+      useCORS: true
+    });
+
+    const link=document.createElement("a");
+    const now=new Date();
+    const stamp=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}_${String(now.getHours()).padStart(2,"0")}-${String(now.getMinutes()).padStart(2,"0")}`;
+    link.download=`arb_analytics_${stamp}.png`;
+    link.href=canvas.toDataURL("image/png");
+    link.click();
+
+    button.textContent="[ downloaded ✓ ]";
+    button.classList.add("downloaded");
     setTimeout(()=>{
-      button.textContent="[ copy stats ]";
-      button.classList.remove("copied");
+      button.textContent="[ download card ]";
+      button.classList.remove("downloaded");
     },1800);
   }catch(err){
-    console.error("Clipboard error:",err);
-    button.textContent="[ copy failed ]";
-    setTimeout(()=>button.textContent="[ copy stats ]",1800);
+    console.error("Download error:",err);
+    button.textContent="[ download failed ]";
+    setTimeout(()=>button.textContent=oldText,1800);
+  }finally{
+    button.disabled=false;
   }
 }
 
-function renderHeatmap(rows){
+function renderHeatmap(rows){function renderHeatmap(rows){
   const box=el("heatmap");
   if(!Array.isArray(rows)||!rows.length){
     box.innerHTML='<span class="heatmap-empty">No activity history yet.</span>';
@@ -374,7 +373,7 @@ async function load(){
 
 window.addEventListener("DOMContentLoaded",()=>{
   el("refreshBtn").addEventListener("click",load);
-  el("copyBtn").addEventListener("click",copyStats);
+  el("downloadBtn").addEventListener("click",downloadStatsCard);
 
   document.addEventListener("keydown",(event)=>{
     const tag=(document.activeElement?.tagName||"").toLowerCase();
