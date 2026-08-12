@@ -305,6 +305,7 @@ function render(data){
   el("newusers").textContent=fmt(get(x,["Bugungi yangi foydalanuvchilar","new_users_today","todayNewUsers","newUsers"]));
 
   const history=Array.isArray(data.history)?data.history:[];
+  renderYesterdayComparison(history);
   el("queries7d").textContent=fmt(sumLast(history,7));
   el("queries30d").textContent=fmt(sumLast(history,30));
 
