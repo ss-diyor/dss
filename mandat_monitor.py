@@ -179,6 +179,16 @@ def manual_check_report() -> str:
     return "\n".join(lines)[:3900]
 
 
+def _format_error_alert(error: Exception) -> str:
+    error_text = escape(str(error))[:1200]
+    return (
+        "❗ <b>SAYT MONITORING XATOSI!</b>\n\n"
+        "Mandat saytini tekshirishda xatolik yuz berdi.\n"
+        f"Xato: <code>{error_text}</code>\n"
+        f"Tekshirilgan manzil: {escape(MONITOR_URL)}"
+    )
+
+
 def _format_alert(old: dict[str, Any] | None, new: dict[str, Any], changed: list[str]) -> str:
     title = new.get("title") or "Noma'lum"
     lines = [
@@ -207,6 +217,7 @@ async def monitor_site(bot: Any) -> None:
     """Bot ishlayotgan paytda saytni fonda kuzatadi."""
     old = _load_saved()
     last_alert_at = 0.0
+    last_error_alert_at = 0.0
     while True:
         try:
             current = await asyncio.to_thread(fetch_snapshot)
@@ -234,4 +245,17 @@ async def monitor_site(bot: Any) -> None:
                 print(f"[mandat-monitor] o'zgarish aniqlandi: {changed}")
         except Exception as error:
             print(f"[mandat-monitor] tekshiruv xatosi: {error}")
+            admin_id = int(os.getenv("ADMIN_ID", "0"))
+            now = time.monotonic()
+            if admin_id > 0 and now - last_error_alert_at >= MONITOR_ALERT_COOLDOWN:
+                try:
+                    await bot.send_message(
+                        chat_id=admin_id,
+                        text=_format_error_alert(error),
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                    )
+                    last_error_alert_at = now
+                except Exception as alert_error:
+                    print(f"[mandat-monitor] xato alert yuborilmadi: {alert_error}")
         await asyncio.sleep(MONITOR_INTERVAL)
