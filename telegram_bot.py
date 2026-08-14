@@ -1133,105 +1133,195 @@ async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
+BROADCAST_WORKERS = max(1, int(os.getenv("BROADCAST_WORKERS", "20")))
+BROADCAST_RATE = max(1.0, float(os.getenv("BROADCAST_RATE", "20")))
+BROADCAST_RETRIES = max(0, int(os.getenv("BROADCAST_RETRIES", "3")))
+_broadcast_lock = asyncio.Lock()
+
+
+def _broadcast_is_blocked(error: Exception) -> bool:
+    """Telegram foydalanuvchisi botni bloklagan yoki akkaunt yopilganini aniqlaydi."""
+    error_name = type(error).__name__.lower()
+    error_text = str(error).lower()
+    return error_name in {"forbidden", "chatnotfound"} or any(
+        marker in error_text
+        for marker in ("forbidden", "bot was blocked", "user is deactivated", "kicked", "chat not found")
+    )
+
+
+class _BroadcastRateLimiter:
+    """Barcha workerlar uchun umumiy, yumshoq Telegram API rate-limit."""
+
+    def __init__(self, rate: float) -> None:
+        self.interval = 1.0 / rate
+        self._lock = asyncio.Lock()
+        self._next_at = 0.0
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            wait_for = max(0.0, self._next_at - now)
+            self._next_at = max(now, self._next_at) + self.interval
+        if wait_for:
+            await asyncio.sleep(wait_for)
+
+
+async def _broadcast_send(bot, uid: str, text: str, limiter: _BroadcastRateLimiter) -> str:
+    """Bitta xabarni yuboradi; parse, transient error va RetryAfter holatlarini boshqaradi."""
+    for attempt in range(BROADCAST_RETRIES + 1):
+        try:
+            await limiter.acquire()
+            await bot.send_message(chat_id=int(uid), text=text, parse_mode="Markdown")
+            return "success"
+        except Exception as error:
+            if "can't parse" in str(error).lower() or "parse entities" in str(error).lower():
+                try:
+                    await limiter.acquire()
+                    await bot.send_message(chat_id=int(uid), text=text)
+                    return "success"
+                except Exception as fallback_error:
+                    error = fallback_error
+
+            if _broadcast_is_blocked(error):
+                return "blocked"
+            if attempt >= BROADCAST_RETRIES:
+                return "failed"
+
+            retry_after = getattr(error, "retry_after", None)
+            if retry_after is None:
+                retry_after = min(8.0, 0.5 * (2 ** attempt))
+            await asyncio.sleep(max(0.5, float(retry_after)))
+    return "failed"
+
+
 async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("\u26d4 Ruxsat yo'q.")
+        await update.message.reply_text("⛔ Ruxsat yo'q.")
         return
 
-    if not context.args:
-        await update.message.reply_text(
-            "\U0001f4e2 *Broadcast foydalanish:*\n"
-            "`/broadcast <xabar matni>`\n\n"
-            "Markdown qo'llab-quvvatlanadi:\n"
-            "`*qalin*`  `_kursiv_`  `` `kod` ``",
-            parse_mode="Markdown",
-        )
+    if _broadcast_lock.locked():
+        await update.message.reply_text("⏳ Hozir boshqa broadcast davom etmoqda. Iltimos, tugashini kuting.")
         return
 
     raw = update.message.text or ""
-    text = raw.split(None, 1)[1] if " " in raw or "\n" in raw else ""
+    text = raw.split(None, 1)[1].strip() if len(raw.split(None, 1)) > 1 else ""
+    if not text:
+        await update.message.reply_text(
+            "📢 *Broadcast foydalanish:*\n`/broadcast <xabar matni>`\n\n"
+            "Markdown qo'llab-quvvatlanadi: `*qalin*`, `_kursiv_`, `` `kod` ``",
+            parse_mode="Markdown",
+        )
+        return
+    if len(text) > 4096:
+        await update.message.reply_text("❌ Xabar 4096 belgidan oshmasligi kerak.")
+        return
 
     try:
         records = await asyncio.to_thread(_all_records)
-    except Exception as e:
-        await update.message.reply_text(f"\u274c Sheets xatosi:\n`{e}`", parse_mode="Markdown")
+    except Exception as error:
+        await update.message.reply_text(f"❌ Sheets xatosi:\n`{escape_md(error)}`", parse_mode="Markdown")
         return
 
-    user_ids = [str(r.get("user_id")) for r in records if r.get("user_id")]
+    user_ids = []
+    seen = set()
+    for record in records:
+        uid = str(record.get("user_id") or "").strip()
+        if uid and uid not in seen:
+            try:
+                int(uid)
+                user_ids.append(uid)
+                seen.add(uid)
+            except ValueError:
+                continue
 
     if not user_ids:
         await update.message.reply_text("Hali foydalanuvchilar yo'q.")
         return
 
     total = len(user_ids)
-    status_msg = await update.message.reply_text(f"\U0001f4e4 Yuborilmoqda... 0/{total}")
+    await _broadcast_lock.acquire()
+    try:
+        status_msg = await update.message.reply_text(f"📤 Yuborilmoqda... 0/{total}")
+    except Exception:
+        _broadcast_lock.release()
+        raise
+    queue = asyncio.Queue()
+    for uid in user_ids:
+        await queue.put(uid)
 
-    success, blocked, failed = 0, [], []
+    limiter = _BroadcastRateLimiter(BROADCAST_RATE)
+    progress_lock = asyncio.Lock()
+    progress = {"done": 0, "success": 0, "blocked": [], "failed": []}
+    last_status = {"at": 0.0}
 
-    for i, uid in enumerate(user_ids, 1):
-        try:
+    async def worker() -> None:
+        while True:
             try:
-                await context.bot.send_message(chat_id=int(uid), text=text, parse_mode="Markdown")
-            except Exception as md_err:
-                if "can't parse" in str(md_err).lower():
-                    await context.bot.send_message(chat_id=int(uid), text=text)
-                else:
-                    raise
-            success += 1
-        except Exception as e:
-            err = str(e).lower()
-            if any(k in err for k in ("forbidden", "blocked", "deactivated", "kicked", "not found")):
-                blocked.append(uid)
-            else:
-                failed.append(uid)
-
-        if i % 10 == 0 or i == total:
+                uid = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
             try:
-                await status_msg.edit_text(f"\U0001f4e4 Yuborilmoqda... {i}/{total}")
-            except Exception:
-                pass
+                result = await _broadcast_send(context.bot, uid, text, limiter)
+                async with progress_lock:
+                    progress["done"] += 1
+                    if result == "success":
+                        progress["success"] += 1
+                    elif result == "blocked":
+                        progress["blocked"].append(uid)
+                    else:
+                        progress["failed"].append(uid)
+                    now = time.monotonic()
+                    if progress["done"] == total or now - last_status["at"] >= 5:
+                        last_status["at"] = now
+                        try:
+                            await status_msg.edit_text(
+                                f"📤 Yuborilmoqda... {progress['done']}/{total}"
+                            )
+                        except Exception:
+                            pass
+            finally:
+                queue.task_done()
 
-        await asyncio.sleep(1)
+    workers = [asyncio.create_task(worker()) for _ in range(min(BROADCAST_WORKERS, total))]
+    await asyncio.gather(*workers)
+    success = progress["success"]
+    blocked = progress["blocked"]
+    failed = progress["failed"]
 
-    # Broadcast tugadi — bloklangan foydalanuvchilarni batch qilib yangilash
+    # Google Sheets'ga bloklanganlar ro'yxatini bitta batch request bilan yozamiz.
     if blocked:
         try:
             sheet = _get_sheet()
-            recs  = _all_records()
-            red_fmt = {
-                "backgroundColor": {
-                    "red": 0.96, "green": 0.80, "blue": 0.80
-                }
-            }
-            for uid in blocked:
-                row = _row_num(recs, uid)
-                if row:
-                    sheet.update(range_name=f"H{row}", values=[["TRUE"]])
-                    sheet.format(f"H{row}", red_fmt)
-        except Exception as e:
-            print(f"[batch is_blocked xato] {e}")
+            recs = _all_records()
+            updates = [
+                {"range": f"H{row}", "values": [["TRUE"]]}
+                for uid in blocked
+                if (row := _row_num(recs, uid))
+            ]
+            if updates:
+                await asyncio.to_thread(sheet.batch_update, updates)
+        except Exception as error:
+            print(f"[broadcast is_blocked batch xato] {error}")
 
-    lines = ["\U0001f4e2 *Broadcast yakunlandi*\n",
-             f"\u2705 Muvaffaqiyatli: *{success}* ta"]
-
+    lines = ["📢 *Broadcast yakunlandi*\n", f"✅ Muvaffaqiyatli: *{success}* ta"]
     if blocked:
-        lines.append(f"\U0001f6ab Bot blok qilgan: *{len(blocked)}* ta")
+        lines.append(f"🚫 Bot blok qilingan: *{len(blocked)}* ta")
         preview = ", ".join(f"`{u}`" for u in blocked[:20])
         if len(blocked) > 20:
             preview += f" ... va yana {len(blocked) - 20} ta"
         lines.append(f"   {preview}")
-
     if failed:
-        lines.append(f"\u26a0\ufe0f Boshqa xato: *{len(failed)}* ta")
+        lines.append(f"⚠️ Qayta urinishlardan keyin xato: *{len(failed)}* ta")
         preview = ", ".join(f"`{u}`" for u in failed[:10])
         if len(failed) > 10:
             preview += f" ... va yana {len(failed) - 10} ta"
         lines.append(f"   {preview}")
-
     try:
         await status_msg.edit_text("\n".join(lines), parse_mode="Markdown")
     except Exception:
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    finally:
+        _broadcast_lock.release()
 
 
 async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
