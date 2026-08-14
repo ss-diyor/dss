@@ -1419,9 +1419,30 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     print(f"[Xato] {context.error}")
 
 
+_mandat_monitor_task: asyncio.Task | None = None
+
+
 async def post_init(application: Application) -> None:
     """Bot ishga tushganda sayt monitoringini fon rejimida boshlaydi."""
-    application.create_task(monitor_site(application.bot), name="mandat-site-monitor")
+    global _mandat_monitor_task
+    _mandat_monitor_task = asyncio.create_task(
+        monitor_site(application.bot),
+        name="mandat-site-monitor",
+    )
+
+
+async def post_shutdown(application: Application) -> None:
+    """Bot to'xtaganda monitoring taskini tartibli yopadi."""
+    global _mandat_monitor_task
+    if _mandat_monitor_task is None or _mandat_monitor_task.done():
+        return
+    _mandat_monitor_task.cancel()
+    try:
+        await _mandat_monitor_task
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _mandat_monitor_task = None
 
 
 def main() -> None:
@@ -1429,7 +1450,13 @@ def main() -> None:
     web_thread.start()
     print(f"Web dashboard ishga tushdi: PORT={os.getenv('PORT', '10000')}")
 
-    application = Application.builder().token(TOKEN).post_init(post_init).build()
+    application = (
+        Application.builder()
+        .token(TOKEN)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
     application.add_handler(CommandHandler("start",     start))
     application.add_handler(CommandHandler("whoami",    whoami))
     application.add_handler(CommandHandler("user",      admin_user))
