@@ -12,6 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import gspread
 from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
+from mandat_monitor import monitor_site
 
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -1418,12 +1419,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     print(f"[Xato] {context.error}")
 
 
+async def post_init(application: Application) -> None:
+    """Bot ishga tushganda sayt monitoringini fon rejimida boshlaydi."""
+    application.create_task(monitor_site(application.bot), name="mandat-site-monitor")
+
+
 def main() -> None:
     web_thread = threading.Thread(target=run_web_server, name="stats-web", daemon=True)
     web_thread.start()
     print(f"Web dashboard ishga tushdi: PORT={os.getenv('PORT', '10000')}")
 
-    application = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(TOKEN).post_init(post_init).build()
     application.add_handler(CommandHandler("start",     start))
     application.add_handler(CommandHandler("whoami",    whoami))
     application.add_handler(CommandHandler("user",      admin_user))
