@@ -1,6 +1,9 @@
 import re
 import time
+import threading
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from urllib.parse import urlencode
 from bs4 import BeautifulSoup
 
@@ -8,9 +11,31 @@ BASE_URL  = "https://mandat.uzbmb.uz"
 HEADERS   = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 CACHE_TTL = 1800  # 30 daqiqa
 
-# TCP ulanishni qayta ishlatish uchun Session
-_session = requests.Session()
-_session.headers.update(HEADERS)
+# Har bir worker thread uchun connection pool'li Session.
+# requests.Session bir nechta thread orasida bo'lishilmaydi, shuning uchun thread-local saqlanadi.
+_session_local = threading.local()
+_retry = Retry(
+    total=2,
+    connect=2,
+    read=2,
+    backoff_factor=0.25,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset({"GET"}),
+    respect_retry_after_header=True,
+)
+REQUEST_TIMEOUT = (4, 15)
+
+
+def _get_session() -> requests.Session:
+    session = getattr(_session_local, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=_retry)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        _session_local.session = session
+    return session
 
 # total_count cache: {(s4, s5, edlang): (total, timestamp)}
 _total_cache: dict = {}
@@ -31,7 +56,7 @@ def _paginate_params(page_number, page_size, s4subject, s5subject, ed_lang_id):
 def _page_has_content(page_num, page_size, s4subject, s5subject, ed_lang_id):
     try:
         params = _paginate_params(page_num, page_size, s4subject, s5subject, ed_lang_id)
-        resp = _session.get(f"{BASE_URL}/Bakalavr/Paginate", params=params, timeout=15)
+        resp = _get_session().get(f"{BASE_URL}/Bakalavr/Paginate", params=params, timeout=REQUEST_TIMEOUT)
         if resp.status_code != 200:
             return False
         soup = BeautifulSoup(resp.text, 'html.parser')
@@ -65,7 +90,7 @@ def _find_true_last_page(current_page, page_size, s4subject, s5subject, ed_lang_
 def _count_cards_on_page(page_num, page_size, s4subject, s5subject, ed_lang_id):
     try:
         params = _paginate_params(page_num, page_size, s4subject, s5subject, ed_lang_id)
-        resp = _session.get(f"{BASE_URL}/Bakalavr/Paginate", params=params, timeout=15)
+        resp = _get_session().get(f"{BASE_URL}/Bakalavr/Paginate", params=params, timeout=REQUEST_TIMEOUT)
         if resp.status_code != 200:
             return page_size
         soup  = BeautifulSoup(resp.text, 'html.parser')
@@ -105,7 +130,7 @@ def get_student_data(entrant_id):
     params = {"entrantid": entrant_id, "lang": "uz"}
 
     try:
-        response = _session.get(url, params=params, timeout=30)
+        response = _get_session().get(url, params=params, timeout=REQUEST_TIMEOUT)
         if response.status_code != 200:
             return {"status": "error", "message": f"Saytga bog'lanib bo'lmadi: {response.status_code}"}
 
