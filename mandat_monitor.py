@@ -146,8 +146,15 @@ def manual_check_report() -> str:
     saved = _load_saved()
     changed = _changed_fields(saved, current) if saved else []
     title = escape(str(current.get("title") or "Noma'lum"))
+    if saved is None:
+        change_status = "⚪ <b>O'ZGARISH: SNAPSHOT HALI YARATILMAGAN</b>"
+    elif changed:
+        change_status = "❗ <b>O'ZGARISH ANIQLANDI!</b>"
+    else:
+        change_status = "✅ <b>O'ZGARISH ANIQLANMADI</b>"
     lines = [
-        "🔎 <b>Mandat monitoring manual check</b>",
+        change_status,
+        "🔎 <b>MANDAT MONITORING MANUAL CHECK</b>",
         f"Holat: <b>{'OK' if current.get('status_code') == 200 else 'XATO'}</b>",
         f"Sahifa: <code>{title}</code>",
         f"HTTP status: <code>{current.get('status_code')}</code>",
@@ -175,7 +182,8 @@ def manual_check_report() -> str:
 def _format_alert(old: dict[str, Any] | None, new: dict[str, Any], changed: list[str]) -> str:
     title = new.get("title") or "Noma'lum"
     lines = [
-        "🔔 <b>Mandat sayti o'zgardi</b>",
+        "❗ <b>O'ZGARISH ANIQLANDI!</b>",
+        "🔔 <b>MANDAT SAYTI O'ZGARDI</b>",
         f"O'zgarishlar: <b>{', '.join(changed)}</b>",
         f"Sahifa: <code>{title}</code>",
         f"HTTP status: <code>{new.get('status_code')}</code>",
