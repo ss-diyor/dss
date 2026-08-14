@@ -203,28 +203,58 @@ def _format_error_alert(error: Exception) -> str:
     )
 
 
+def _diff_value(old_value: Any, new_value: Any) -> str:
+    old_text = escape(_normalize(json.dumps(old_value, ensure_ascii=False) if isinstance(old_value, (dict, list)) else str(old_value or "—")))
+    new_text = escape(_normalize(json.dumps(new_value, ensure_ascii=False) if isinstance(new_value, (dict, list)) else str(new_value or "—")))
+    return f"<code>{old_text}</code> → <code>{new_text}</code>"
+
+
+def _collection_diff(old_items: list[dict], new_items: list[dict], label: str) -> list[str]:
+    old_map = {str(item.get("id") or item.get("url") or item.get("text")): item for item in old_items}
+    new_map = {str(item.get("id") or item.get("url") or item.get("text")): item for item in new_items}
+    lines: list[str] = []
+    for key in sorted(set(old_map) | set(new_map)):
+        old_item = old_map.get(key)
+        new_item = new_map.get(key)
+        if old_item is None:
+            lines.append(f"• {label} qo'shildi: <b>{escape(str(new_item.get('text') or key))}</b>")
+        elif new_item is None:
+            lines.append(f"• {label} o'chirildi: <b>{escape(str(old_item.get('text') or key))}</b>")
+        elif old_item != new_item:
+            old_text = old_item.get("text") or old_item.get("url") or key
+            new_text = new_item.get("text") or new_item.get("url") or key
+            lines.append(f"• {label} o'zgardi: <code>{escape(str(old_text))}</code> → <code>{escape(str(new_text))}</code>")
+            old_url = old_item.get("href") or old_item.get("url") or old_item.get("onclick")
+            new_url = new_item.get("href") or new_item.get("url") or new_item.get("onclick")
+            if old_url != new_url:
+                lines.append(f"  Manzil: <code>{escape(str(old_url or '—'))}</code> → <code>{escape(str(new_url or '—'))}</code>")
+    return lines
+
+
 def _format_alert(old: dict[str, Any] | None, new: dict[str, Any], changed: list[str]) -> str:
-    title = new.get("title") or "Noma'lum"
+    old = old or {}
     lines = [
         "❗ <b>O'ZGARISH ANIQLANDI!</b>",
         "🔔 <b>MANDAT SAYTI O'ZGARDI</b>",
         f"O'zgarishlar: <b>{', '.join(changed)}</b>",
-        f"Sahifa: <code>{title}</code>",
-        f"HTTP status: <code>{new.get('status_code')}</code>",
+        "\n<b>Aniq farqlar:</b>",
     ]
+    scalar_fields = {
+        "status_code": "HTTP status",
+        "title": "Sahifa nomi",
+        "forms": "Forma endpointlari",
+        "important_ids": "Muhim DOM elementlari",
+        "extra_section_present": "Qo'shimcha bo'limi",
+    }
+    for key, label in scalar_fields.items():
+        if old.get(key) != new.get(key):
+            lines.append(f"• {label}: {_diff_value(old.get(key), new.get(key))}")
     if "asosiy navigatsiya tugmalari" in changed:
-        buttons = new.get("navigation_buttons") or []
-        lines.append(f"Asosiy tugmalar soni: <b>{len(buttons)}</b>")
-        for item in buttons[:12]:
-            destination = item.get("href") or item.get("onclick") or "ichki bo'lim"
-            lines.append(f"• {_normalize(item.get('text'))} — {destination}")
+        lines.extend(_collection_diff(old.get("navigation_buttons") or [], new.get("navigation_buttons") or [], "Navigatsiya tugmasi"))
     if "Qo'shimcha bo'limi nomlari yoki havolalari" in changed:
-        links = new.get("extra_links") or []
-        lines.append(f"Qo'shimcha xizmatlar soni: <b>{len(links)}</b>")
-        for item in links[:10]:
-            lines.append(f"• {_normalize(item.get('text'))}: {item.get('url')}")
-    lines.append(f"Tekshirish: {MONITOR_URL}")
-    return "\n".join(lines)
+        lines.extend(_collection_diff(old.get("extra_links") or [], new.get("extra_links") or [], "Qo'shimcha xizmati"))
+    lines.append(f"\nTekshirish: {escape(MONITOR_URL)}")
+    return "\n".join(lines)[:3900]
 
 
 async def monitor_site(bot: Any) -> None:
