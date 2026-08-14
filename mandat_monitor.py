@@ -37,6 +37,28 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+def _navigation_buttons(soup: BeautifulSoup) -> list[dict[str, str]]:
+    """Bosh navigatsiya qatoridagi card-header tugmalarini universal ajratadi."""
+    buttons = []
+    for element in soup.select(".card-header.card-div, [id^='divbtn']"):
+        element_id = str(element.get("id") or "").strip()
+        classes = " ".join(sorted(str(element.get("class") or "").split()))
+        text = _normalize(element.get_text(" ", strip=True))
+        anchor = element.find("a", href=True)
+        href = urljoin(MONITOR_URL, anchor.get("href", "").strip()) if anchor else ""
+        onclick = _normalize(element.get("onclick") or "")
+        item = {
+            "id": element_id,
+            "text": text,
+            "href": href,
+            "onclick": onclick,
+            "classes": classes,
+        }
+        if item not in buttons:
+            buttons.append(item)
+    return sorted(buttons, key=lambda item: (item["text"], item["id"], item["href"]))
+
+
 def _extra_links(soup: BeautifulSoup) -> list[dict[str, str]]:
     root = soup.select_one("#collapseAdvancedSearch2")
     if root is None:
@@ -76,6 +98,7 @@ def collect_snapshot(html: str, status_code: int = 200) -> dict[str, Any]:
         "title": _normalize(soup.title.get_text(" ", strip=True) if soup.title else ""),
         "forms": [list(item) for item in forms],
         "important_ids": present_ids,
+        "navigation_buttons": _navigation_buttons(soup),
         "extra_section_present": bool(soup.find(id="divbtn3") or soup.find(id="collapseAdvancedSearch2")),
         "extra_links": extra,
     }
@@ -109,6 +132,7 @@ def _changed_fields(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
         "title": "sahifa nomi",
         "forms": "forma endpointlari",
         "important_ids": "asosiy DOM elementlari",
+        "navigation_buttons": "asosiy navigatsiya tugmalari",
         "extra_section_present": "Qo'shimcha bo'limi mavjudligi",
         "extra_links": "Qo'shimcha bo'limi nomlari yoki havolalari",
     }
@@ -123,6 +147,12 @@ def _format_alert(old: dict[str, Any] | None, new: dict[str, Any], changed: list
         f"Sahifa: <code>{title}</code>",
         f"HTTP status: <code>{new.get('status_code')}</code>",
     ]
+    if "asosiy navigatsiya tugmalari" in changed:
+        buttons = new.get("navigation_buttons") or []
+        lines.append(f"Asosiy tugmalar soni: <b>{len(buttons)}</b>")
+        for item in buttons[:12]:
+            destination = item.get("href") or item.get("onclick") or "ichki bo'lim"
+            lines.append(f"• {_normalize(item.get('text'))} — {destination}")
     if "Qo'shimcha bo'limi nomlari yoki havolalari" in changed:
         links = new.get("extra_links") or []
         lines.append(f"Qo'shimcha xizmatlar soni: <b>{len(links)}</b>")
