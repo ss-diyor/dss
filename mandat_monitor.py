@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+from html import escape
 import time
 from pathlib import Path
 from typing import Any
@@ -137,6 +138,38 @@ def _changed_fields(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
         "extra_links": "Qo'shimcha bo'limi nomlari yoki havolalari",
     }
     return [label for key, label in labels.items() if old.get(key) != new.get(key)]
+
+
+def manual_check_report() -> str:
+    """Saytni darhol tekshiradi; snapshotni o'zgartirmaydi."""
+    current = fetch_snapshot()
+    saved = _load_saved()
+    changed = _changed_fields(saved, current) if saved else []
+    title = escape(str(current.get("title") or "Noma'lum"))
+    lines = [
+        "🔎 <b>Mandat monitoring manual check</b>",
+        f"Holat: <b>{'OK' if current.get('status_code') == 200 else 'XATO'}</b>",
+        f"Sahifa: <code>{title}</code>",
+        f"HTTP status: <code>{current.get('status_code')}</code>",
+        f"Asosiy tugmalar: <b>{len(current.get('navigation_buttons') or [])}</b> ta",
+        f"Qo'shimcha xizmatlar: <b>{len(current.get('extra_links') or [])}</b> ta",
+    ]
+    if saved is None:
+        lines.append("Snapshot: hali yaratilmagan")
+    elif changed:
+        lines.append("Aniqlangan o'zgarishlar:")
+        lines.extend(f"• {escape(item)}" for item in changed)
+    else:
+        lines.append("O'zgarish: aniqlanmadi")
+
+    lines.append("\n<b>Asosiy tugmalar:</b>")
+    for item in (current.get("navigation_buttons") or [])[:12]:
+        destination = item.get("href") or item.get("onclick") or "ichki bo'lim"
+        lines.append(f"• {escape(str(item.get('text') or ''))} — <code>{escape(str(destination))}</code>")
+    lines.append("\n<b>Qo'shimcha bo'limi:</b>")
+    for item in (current.get("extra_links") or [])[:10]:
+        lines.append(f"• {escape(str(item.get('text') or ''))} — {escape(str(item.get('url') or ''))}")
+    return "\n".join(lines)[:3900]
 
 
 def _format_alert(old: dict[str, Any] | None, new: dict[str, Any], changed: list[str]) -> str:
