@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import gspread
 from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
-from mandat_monitor import monitor_site
+from mandat_monitor import manual_check_report, monitor_site
 
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -955,6 +955,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # ── Admin handlers ────────────────────────────────────────────────────────────
 
+async def admin_monitor_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sayt monitoringini admin buyrug'i bilan darhol tekshiradi."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Ruxsat yo'q.")
+        return
+
+    status_msg = await update.message.reply_text("🔎 Mandat sayti tekshirilmoqda...")
+    try:
+        report = await asyncio.to_thread(manual_check_report)
+        await status_msg.edit_text(report, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as error:
+        await status_msg.edit_text(
+            f"⚠️ Manual check xatosi:\n<code>{_he(str(error))}</code>",
+            parse_mode="HTML",
+        )
+
+
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id
     is_admin = "Ha \u2705" if uid == ADMIN_ID else "Yo'q \u274c"
@@ -1461,6 +1478,7 @@ def main() -> None:
     application.add_handler(CommandHandler("whoami",    whoami))
     application.add_handler(CommandHandler("user",      admin_user))
     application.add_handler(CommandHandler("stats",     admin_stats))
+    application.add_handler(CommandHandler("monitor_check", admin_monitor_check))
     application.add_handler(CommandHandler("users",     admin_users))
     application.add_handler(CommandHandler("export",    admin_export))
     application.add_handler(CommandHandler("broadcast", admin_broadcast))
