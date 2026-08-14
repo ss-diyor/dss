@@ -678,6 +678,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 
+SEARCH_TIMEOUT = max(5, int(os.getenv("SEARCH_TIMEOUT", "15")))
+SEARCH_CACHE_TTL = max(30, int(os.getenv("SEARCH_CACHE_TTL", "600")))
+_student_cache: dict[str, tuple[float, dict]] = {}
+
+
+async def get_student_data_fast(entrant_id: str) -> dict:
+    """Cache, timeout va alohida thread bilan qidiruvni bot event-loop'ini bloklamasdan bajaradi."""
+    key = str(entrant_id).strip()
+    now = time.monotonic()
+    cached = _student_cache.get(key)
+    if cached and now - cached[0] < SEARCH_CACHE_TTL:
+        return cached[1]
+    if cached:
+        _student_cache.pop(key, None)
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(get_student_data, key),
+            timeout=SEARCH_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        return {"status": "error", "message": "Sayt javobi juda kechikdi. Iltimos, birozdan so'ng qayta urinib ko'ring."}
+    except Exception as error:
+        return {"status": "error", "message": str(error)}
+
+    if result.get("status") in {"success", "not_found"}:
+        _student_cache[key] = (time.monotonic(), result)
+        if len(_student_cache) > 2000:
+            oldest_key = min(_student_cache, key=lambda item: _student_cache[item][0])
+            _student_cache.pop(oldest_key, None)
+    return result
+
+
 def get_user_recent_searches(uid: str) -> list[str]:
     try:
         records = _all_records()
@@ -852,9 +885,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     asyncio.create_task(asyncio.to_thread(update_user_searched_ids, uid, user_input))
 
     asyncio.create_task(asyncio.to_thread(record_user, update.effective_user, True))
-    await update.message.reply_text("\U0001f50d Qidirilmoqda... iltimos kuting.")
+    status_msg = await update.message.reply_text("\U0001f50d Qidirilmoqda... iltimos kuting.")
 
-    result = get_student_data(user_input)
+    result = await get_student_data_fast(user_input)
     print(f"[scraper] status={result['status']}")
 
     if result["status"] == "success":
@@ -866,11 +899,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         buttons.append([InlineKeyboardButton("⭐ Bu ID ni saqlash", callback_data=f"save_{user_input}")])
         reply_markup = InlineKeyboardMarkup(buttons)
 
-        await update.message.reply_text(
-            "\u2705 *Natija topildi:*\n\n" + format_result(d),
-            parse_mode="Markdown",
-            reply_markup=reply_markup,
-        )
+        try:
+            await status_msg.edit_text(
+                "\u2705 *Natija topildi:*\n\n" + format_result(d),
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
+        except Exception:
+            await update.message.reply_text(
+                "\u2705 *Natija topildi:*\n\n" + format_result(d),
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
 
         asyncio.create_task(_notify_group(context.bot, update.effective_user, user_input, d))
 
@@ -902,13 +942,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await counting_msg.delete()
 
     elif result["status"] == "not_found":
-        await update.message.reply_text(
+        await status_msg.edit_text(
             "\u274c Ushbu ID bo'yicha ma'lumot topilmadi.\n"
             "ID raqam to'g'ri ekanligini tekshiring."
         )
     else:
         print(f"[scraper xato] {result.get('message')}")
-        await update.message.reply_text(
+        await status_msg.edit_text(
             f"\u26a0\ufe0f Xatolik yuz berdi:\n{result['message']}"
         )
 
@@ -1332,26 +1372,26 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     if data.startswith("search_"):
         target_id = data.split("_")[1]
-        await query.message.reply_text(f"🔍 <b>{target_id}</b> qidirilmoqda...", parse_mode="HTML")
+        loading_msg = await query.message.reply_text(f"🔍 <b>{target_id}</b> qidirilmoqda...", parse_mode="HTML")
         
         asyncio.create_task(asyncio.to_thread(update_user_searched_ids, uid, target_id))
         asyncio.create_task(asyncio.to_thread(record_user, query.from_user, True))
 
-        res = get_student_data(target_id)
+        res = await get_student_data_fast(target_id)
         if res["status"] == "success":
             d = res["data"]
             buttons = []
             if d.get("page_link"):
                 buttons.append([InlineKeyboardButton("🌐 Saytda ko'rish", url=d["page_link"])])
             buttons.append([InlineKeyboardButton("⭐ Bu ID ni saqlash", callback_data=f"save_{target_id}")])
-            await query.message.reply_text(
+            await loading_msg.edit_text(
                 "✅ *Natija topildi:*\n\n" + format_result(d),
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             asyncio.create_task(_notify_group(context.bot, query.from_user, target_id, d))
         else:
-            await query.message.reply_text("❌ Ushbu ID bo'yicha ma'lumot topilmadi.")
+            await loading_msg.edit_text("❌ Ushbu ID bo'yicha ma'lumot topilmadi.")
 
     elif data.startswith("save_"):
         target_id = data.split("_")[1]
