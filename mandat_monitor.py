@@ -26,6 +26,7 @@ MONITOR_INTERVAL = max(60, int(os.getenv("MANDAT_MONITOR_INTERVAL", "300")))
 MONITOR_TIMEOUT = max(5, int(os.getenv("MANDAT_MONITOR_TIMEOUT", "20")))
 MONITOR_SNAPSHOT = Path(os.getenv("MANDAT_MONITOR_SNAPSHOT", "mandat_monitor_snapshot.json"))
 MONITOR_ALERT_COOLDOWN = max(300, int(os.getenv("MANDAT_MONITOR_ALERT_COOLDOWN", "900")))
+MONITOR_STATUS_ENABLED = os.getenv("MANDAT_MONITOR_STATUS_ENABLED", "1").lower() not in {"0", "false", "no"}
 
 _SESSION = requests.Session()
 _SESSION.headers.update({
@@ -179,6 +180,19 @@ def manual_check_report() -> str:
     return "\n".join(lines)[:3900]
 
 
+def _format_status_report(snapshot: dict[str, Any]) -> str:
+    """Har bir muvaffaqiyatli tekshiruvdan keyingi qisqa admin statusi."""
+    title = escape(str(snapshot.get("title") or "Noma'lum"))
+    return (
+        "✅ <b>MANDAT MONITORING HOLATI: OK</b>\n\n"
+        f"Sahifa: <code>{title}</code>\n"
+        f"HTTP status: <code>{snapshot.get('status_code')}</code>\n"
+        f"Asosiy tugmalar: <b>{len(snapshot.get('navigation_buttons') or [])}</b> ta\n"
+        f"Qo'shimcha xizmatlar: <b>{len(snapshot.get('extra_links') or [])}</b> ta\n"
+        f"Tekshirilgan manzil: {escape(MONITOR_URL)}"
+    )
+
+
 def _format_error_alert(error: Exception) -> str:
     error_text = escape(str(error))[:1200]
     return (
@@ -221,14 +235,16 @@ async def monitor_site(bot: Any) -> None:
     while True:
         try:
             current = await asyncio.to_thread(fetch_snapshot)
+            change_detected = False
+            admin_id = int(os.getenv("ADMIN_ID", "0"))
             if old is None:
                 _save(current)
                 old = current
                 print("[mandat-monitor] boshlang'ich snapshot saqlandi")
             elif current.get("fingerprint") != old.get("fingerprint"):
+                change_detected = True
                 changed = _changed_fields(old, current)
                 now = time.monotonic()
-                admin_id = int(os.getenv("ADMIN_ID", "0"))
                 if changed and admin_id > 0 and now - last_alert_at >= MONITOR_ALERT_COOLDOWN:
                     try:
                         await bot.send_message(
@@ -243,6 +259,19 @@ async def monitor_site(bot: Any) -> None:
                 _save(current)
                 old = current
                 print(f"[mandat-monitor] o'zgarish aniqlandi: {changed}")
+
+            # O'zgarish bo'lmagan muvaffaqiyatli tekshiruvda status yuboriladi.
+            # O'zgarish bo'lsa, shu siklda status emas, faqat yuqori ustuvor alert yuboriladi.
+            if MONITOR_STATUS_ENABLED and not change_detected and admin_id > 0:
+                try:
+                    await bot.send_message(
+                        chat_id=admin_id,
+                        text=_format_status_report(current),
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                    )
+                except Exception as status_error:
+                    print(f"[mandat-monitor] status xabari yuborilmadi: {status_error}")
         except Exception as error:
             print(f"[mandat-monitor] tekshiruv xatosi: {error}")
             admin_id = int(os.getenv("ADMIN_ID", "0"))
