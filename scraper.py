@@ -201,11 +201,22 @@ def _parse_mandat2025_details(soup, entrant_id, page_url):
     hero_status = _text(soup.select_one(".m3-hero__status"))
     hero_classes = set(hero.get("class") or [])
     status_lower = hero_status.lower()
-    if "grant" in hero_classes or "grant" in status_lower or "grant" in " ".join(hero_classes):
+    normalized_status = status_lower.replace("’", "'").replace("ʻ", "'")
+    explicitly_not_recommended = (
+        "tavsiya etilmadi" in normalized_status
+        or "tavsiya etilmagan" in normalized_status
+        or "qabul qilinmadi" in normalized_status
+        or "hech narsa topilmadi" in normalized_status
+        or "fail" in " ".join(hero_classes)
+        or "not-found" in " ".join(hero_classes)
+    )
+    if explicitly_not_recommended:
+        result_status = "not_recommended"
+    elif "grant" in hero_classes or "grant" in normalized_status or "grant" in " ".join(hero_classes):
         result_status = "grant"
-    elif "contract" in hero_classes or "kontrakt" in status_lower or "contract" in status_lower or "contract" in " ".join(hero_classes):
+    elif "contract" in hero_classes or "kontrakt" in normalized_status or "contract" in normalized_status or "contract" in " ".join(hero_classes):
         result_status = "contract"
-    elif "qabul" in status_lower or "tavsiya" in status_lower:
+    elif "qabul" in normalized_status or "tavsiya" in normalized_status:
         result_status = "accepted"
     else:
         result_status = "not_recommended"
