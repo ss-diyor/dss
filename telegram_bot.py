@@ -549,15 +549,41 @@ def _lang_name(ed_lang_id) -> str | None:
     return ED_LANG.get(str(ed_lang_id), str(ed_lang_id))
 
 
+def _admission_label(data: dict) -> str:
+    labels = {
+        "grant": "Davlat granti",
+        "contract": "To‘lov-kontrakt",
+        "accepted": "Qabul qilindi",
+        "not_recommended": "Talabalikka tavsiya etilmadi",
+    }
+    return labels.get(str(data.get("result_status") or ""), str(data.get("pass_status") or "Noma'lum"))
+
+
 def format_result(d: dict) -> str:
-    status_emoji = "\u2705" if d["is_pass"] else "\u274c"
+    status_emoji = "✅" if d.get("is_pass") else "❌"
     name = escape_md(str(d.get("name") or ""))
     lines = [
-        f"\U0001f464 *{name}*",
-        f"\U0001f194 ID: `{d['id']}`",
-        f"\U0001f4ca Ball: *{d['score']}*",
-        f"\U0001f4cc Holat: *{escape_md(str(d.get('pass_status') or ''))}* {status_emoji}",
+        f"👤 *{name}*",
+        f"🆔 ID: `{d['id']}`",
+        f"📊 Ball: *{escape_md(str(d.get('score') or '—'))}*",
+        f"📌 Holat: *{escape_md(_admission_label(d))}* {status_emoji}",
     ]
+    accepted = d.get("accepted_choice") or {}
+    if accepted:
+        lines.extend([
+            f"🏛 OTM: *{escape_md(str(accepted.get('university') or '—'))}*",
+            f"📚 Yo‘nalish: *{escape_md(str(accepted.get('direction') or '—'))}*",
+            f"🕒 Ta’lim shakli: *{escape_md(str(accepted.get('education_form') or '—'))}*",
+            f"🎓 Qabul turi: *{escape_md(str(accepted.get('status_text') or _admission_label(d)))}*",
+        ])
+    choices = d.get("choices") or []
+    if choices:
+        lines.append("\n📋 *Tanlangan yo‘nalishlar:* ")
+        for choice in choices[:5]:
+            status = choice.get("status")
+            mark = "✅" if status in {"grant", "contract", "accepted"} else "▫️"
+            label = "Grant" if status == "grant" else "Kontrakt" if status == "contract" else "Qabul qilinmadi" if status == "not_recommended" else "Tanlov"
+            lines.append(f"{mark} {escape_md(str(choice.get('priority') or ''))}: {escape_md(str(choice.get('university') or ''))} — {label}")
     if d.get("rank"):
         rank      = d["rank"]
         total     = d.get("total_count")
@@ -596,8 +622,9 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
 
         student_name = _he(str(data.get("name") or "—"))
         score        = _he(str(data.get("score") or "—"))
-        pass_status  = _he(str(data.get("pass_status") or "—"))
-        status_emoji = "\u2705" if data.get("is_pass") else "\u274c"
+        pass_status  = _he(_admission_label(data))
+        status_emoji = "✅" if data.get("is_pass") else "❌"
+        accepted = data.get("accepted_choice") or {}
 
         subjects = []
         if data.get("s4subject"): subjects.append(_he(str(data["s4subject"])))
@@ -610,10 +637,18 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
         if data.get("rank"):
             rank_str = f"\n\U0001f3c6 O'rin: <b>{data['rank']}-o'rin</b>"
 
+        admission_lines = ""
+        if accepted:
+            admission_lines = (
+                f"\n\U0001f3db OTM: <b>{_he(str(accepted.get('university') or '—'))}</b>"
+                f"\n\U0001f4da Yo'nalish: <b>{_he(str(accepted.get('direction') or '—'))}</b>"
+                f"\n\U0001f393 Qabul turi: <b>{_he(str(accepted.get('status_text') or _admission_label(data)))}</b>"
+            )
         natija = (
             f"\U0001f464 Abituriyent: {student_name}\n"
             f"\U0001f4ca Ball: <b>{score}</b>\n"
-            f"\U0001f4cc Holat: <b>{pass_status}</b> {status_emoji}\n"
+            f"\U0001f4cc Holat: <b>{pass_status}</b> {status_emoji}"
+            f"{admission_lines}\n"
             f"\U0001f4da Fanlar: {subjects_str}\n"
             f"\U0001f5e3 Ta'lim tili: <b>{lang_str}</b>"
             f"{rank_str}"
