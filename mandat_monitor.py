@@ -290,18 +290,6 @@ async def monitor_site(bot: Any) -> None:
                 old = current
                 print(f"[mandat-monitor] o'zgarish aniqlandi: {changed}")
 
-            # O'zgarish bo'lmagan muvaffaqiyatli tekshiruvda status yuboriladi.
-            # O'zgarish bo'lsa, shu siklda status emas, faqat yuqori ustuvor alert yuboriladi.
-            if MONITOR_STATUS_ENABLED and not change_detected and admin_id > 0:
-                try:
-                    await bot.send_message(
-                        chat_id=admin_id,
-                        text=_format_status_report(current),
-                        parse_mode="HTML",
-                        disable_web_page_preview=True,
-                    )
-                except Exception as status_error:
-                    print(f"[mandat-monitor] status xabari yuborilmadi: {status_error}")
         except Exception as error:
             print(f"[mandat-monitor] tekshiruv xatosi: {error}")
             admin_id = int(os.getenv("ADMIN_ID", "0"))
