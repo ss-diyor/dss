@@ -118,6 +118,13 @@ MAX_TOPICS = 50          # Maximum number of topics to create
 
 _sheet = None
 _stats_sheet = None
+_records_cache: list[dict] | None = None
+_records_cache_ts = 0.0
+_records_cache_lock = threading.RLock()
+RECORDS_CACHE_TTL = max(5, int(os.getenv("SHEETS_RECORDS_CACHE_TTL", "30")))
+_stats_update_lock = threading.Lock()
+_last_stats_update = 0.0
+STATS_SHEET_UPDATE_TTL = max(30, int(os.getenv("STATS_SHEET_UPDATE_TTL", "60")))
 
 def _get_sheet() -> gspread.Worksheet:
     global _sheet
@@ -154,8 +161,17 @@ def _get_stats_sheet() -> gspread.Worksheet:
 
 
 def update_stats_sheet() -> None:
-    """Statistics varag'ini tarixiy ma'lumotlar bilan yangilaydi."""
+    """Statistics varag'ini interval bilan yangilaydi; har bir query uchun Sheets read qilmaydi."""
+    global _last_stats_update
+    now_mono = time.monotonic()
+    if now_mono - _last_stats_update < STATS_SHEET_UPDATE_TTL:
+        return
+    if not _stats_update_lock.acquire(blocking=False):
+        return
     try:
+        now_mono = time.monotonic()
+        if now_mono - _last_stats_update < STATS_SHEET_UPDATE_TTL:
+            return
         records = _all_records()
         today = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%d.%m.%Y")
         today_full = datetime.now(tz=timezone(timedelta(hours=5))).strftime("%Y-%m-%d")
@@ -264,13 +280,36 @@ def update_stats_sheet() -> None:
             # Add new row at the end
             next_row = len(all_data) + 2
             ws.update(range_name=f"A{next_row}:F{next_row}", values=[today_data])
-            
+        _last_stats_update = now_mono
     except Exception as e:
         print(f"[update_stats_sheet xato] {e}")
+    finally:
+        _stats_update_lock.release()
 
 
-def _all_records() -> list[dict]:
-    return _get_sheet().get_all_records(expected_headers=HEADERS)
+def _all_records(force: bool = False) -> list[dict]:
+    """Userlar varag'ini quota-safe cache bilan o'qiydi."""
+    global _records_cache, _records_cache_ts
+    now = time.monotonic()
+    with _records_cache_lock:
+        if not force and _records_cache is not None and now - _records_cache_ts < RECORDS_CACHE_TTL:
+            return [dict(row) for row in _records_cache]
+        try:
+            records = _get_sheet().get_all_records(expected_headers=HEADERS)
+            _records_cache = [dict(row) for row in records]
+            _records_cache_ts = now
+            return [dict(row) for row in records]
+        except gspread.exceptions.APIError as error:
+            if _records_cache is not None:
+                print(f"[Sheets cache fallback] {error}")
+                return [dict(row) for row in _records_cache]
+            raise
+
+
+def _invalidate_records_cache() -> None:
+    global _records_cache_ts
+    with _records_cache_lock:
+        _records_cache_ts = 0.0
 
 
 def _row_num(records: list[dict], uid: str):
@@ -473,6 +512,7 @@ def record_user(user, query: bool = False) -> None:
     except Exception as e:
         print(f"[record_user xato] {e}")
         return
+    _invalidate_records_cache()
     try:
         update_stats_sheet()
     except Exception as e:
