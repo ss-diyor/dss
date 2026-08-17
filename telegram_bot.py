@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from html import escape as html_escape
 import threading
 import time
 from pathlib import Path
@@ -600,64 +601,64 @@ def _admission_label(data: dict) -> str:
 
 
 def format_result(d: dict) -> str:
+    """Natijani Telegram HTML formatida, qabul qilingan OTMni quote blokida qaytaradi."""
+    esc = lambda value: html_escape(str(value or "—"), quote=False)
     status_emoji = "✅" if d.get("is_pass") else "❌"
-    name = escape_md(str(d.get("name") or ""))
     lines = [
-        f"👤 *{name}*",
-        f"🆔 ID: `{d['id']}`",
-        f"📊 Ball: *{escape_md(str(d.get('score') or '—'))}*",
-        f"📌 Holat: *{escape_md(_admission_label(d))}* {status_emoji}",
+        f"👤 <b>{esc(d.get('name'))}</b>",
+        f"🆔 ID: <code>{esc(d.get('id'))}</code>",
+        f"📊 Ball: <b>{esc(d.get('score'))}</b>",
+        f"📌 Holat: <b>{esc(_admission_label(d))}</b> {status_emoji}",
     ]
+
     accepted = d.get("accepted_choice") or {}
     if accepted:
         lines.extend([
-            f"🏛 OTM: *{escape_md(str(accepted.get('university') or '—'))}*",
-            f"📚 Yo‘nalish: *{escape_md(str(accepted.get('direction') or '—'))}*",
-            f"🕒 Ta’lim shakli: *{escape_md(str(accepted.get('education_form') or '—'))}*",
-            f"🎓 Qabul turi: *{escape_md(str(accepted.get('status_text') or _admission_label(d)))}*",
+            "",
+            "<blockquote>",
+            f"🏛 <b>Qabul qilingan OTM:</b> {esc(accepted.get('university'))}",
+            f"📚 <b>Yo‘nalish:</b> {esc(accepted.get('direction'))}",
+            f"🕒 <b>Ta’lim shakli:</b> {esc(accepted.get('education_form'))}",
+            f"🎓 <b>Qabul turi:</b> {esc(accepted.get('status_text') or _admission_label(d))}",
+            "</blockquote>",
         ])
+
     choices = d.get("choices") or []
     if choices:
-        lines.append("\n📋 *Tanlangan yo‘nalishlar va o‘tish ballari:* ")
+        lines.append("\n📋 <b>Tanlangan yo‘nalishlar va o‘tish ballari:</b>")
         for choice in choices:
             status = choice.get("status")
             mark = "✅" if status in {"grant", "contract", "accepted"} else "▫️"
             label = "Grant" if status == "grant" else "Kontrakt" if status == "contract" else "Qabul qilinmadi" if status == "not_recommended" else "Tanlov"
-            priority = escape_md(str(choice.get("priority") or ""))
-            university = escape_md(str(choice.get("university") or "—"))
-            direction = escape_md(str(choice.get("direction") or "—"))
-            education_form = escape_md(str(choice.get("education_form") or "—"))
-            grant_score = escape_md(str(choice.get("grant_score") or "—"))
-            contract_score = escape_md(str(choice.get("contract_score") or "—"))
             lines.extend([
-                f"\n{mark} *{priority}* — {label}",
-                f"🏛 OTM: {university}",
-                f"📚 Yo‘nalish: {direction}",
-                f"🕒 Ta’lim shakli: {education_form}",
-                f"🎓 Grant o‘tish bali: *{grant_score}*",
-                f"💳 Kontrakt o‘tish bali: *{contract_score}*",
+                "",
+                f"{mark} <b>{esc(choice.get('priority'))}</b> — {esc(label)}",
+                f"🏛 OTM: {esc(choice.get('university'))}",
+                f"📚 Yo‘nalish: {esc(choice.get('direction'))}",
+                f"🕒 Ta’lim shakli: {esc(choice.get('education_form'))}",
+                f"🎓 Grant o‘tish bali: <b>{esc(choice.get('grant_score'))}</b>",
+                f"💳 Kontrakt o‘tish bali: <b>{esc(choice.get('contract_score'))}</b>",
             ])
+
     if d.get("rank"):
-        rank      = d["rank"]
-        total     = d.get("total_count")
-        page_link = d.get("page_link")
-
+        rank = d["rank"]
+        total = d.get("total_count")
         if total:
-            pct      = round(rank / total * 100, 1)
-            rank_str = f"*{rank}-o'rin* (jami {total} ta abituriyent ichida) — top {pct}%"
+            pct = round(rank / total * 100, 1)
+            rank_str = f"<b>{rank}-o‘rin</b> (jami {total} ta abituriyent ichida) — top {pct}%"
         else:
-            rank_str = f"*{rank}-o'rin*"
+            rank_str = f"<b>{rank}-o‘rin</b>"
+        lines.append(f"🏆 Reytingda: {rank_str}")
 
-        lines.append(f"\U0001f3c6 Reytingda: {rank_str}")
     subjects = []
-    if d.get("s4subject"): subjects.append(escape_md(str(d["s4subject"])))
-    if d.get("s5subject"): subjects.append(escape_md(str(d["s5subject"])))
+    if d.get("s4subject"): subjects.append(esc(d["s4subject"]))
+    if d.get("s5subject"): subjects.append(esc(d["s5subject"]))
     if subjects:
-        lines.append(f"\U0001f4da Fanlar: {' | '.join(subjects)}")
+        lines.append(f"📚 Fanlar: {' | '.join(subjects)}")
     lang = _lang_name(d.get("ed_lang_id"))
     if lang:
-        lines.append(f"\U0001f5e3 Ta'lim tili: *{escape_md(lang)}*")
-    lines.append("\n— @mandat\\_applicant\\_ratingbot orqali tekshirildi")
+        lines.append(f"🗣 Ta’lim tili: <b>{esc(lang)}</b>")
+    lines.append("\n— @mandat_applicant_ratingbot orqali tekshirildi")
     return "\n".join(lines)
 
 # ── Guruh bildirishnomasi ─────────────────────────────────────────────────────
@@ -990,14 +991,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         try:
             await status_msg.edit_text(
-                "\u2705 *Natija topildi:*\n\n" + format_result(d),
-                parse_mode="Markdown",
+                "✅ <b>Natija topildi:</b>\n\n" + format_result(d),
+                parse_mode="HTML",
                 reply_markup=reply_markup,
             )
         except Exception:
             await update.message.reply_text(
-                "\u2705 *Natija topildi:*\n\n" + format_result(d),
-                parse_mode="Markdown",
+                "✅ <b>Natija topildi:</b>\n\n" + format_result(d),
+                parse_mode="HTML",
                 reply_markup=reply_markup,
             )
 
@@ -1491,8 +1492,8 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 buttons.append([InlineKeyboardButton("🌐 Saytda ko'rish", url=d["page_link"])])
             buttons.append([InlineKeyboardButton("⭐ Bu ID ni saqlash", callback_data=f"save_{target_id}")])
             await loading_msg.edit_text(
-                "✅ *Natija topildi:*\n\n" + format_result(d),
-                parse_mode="Markdown",
+                "✅ <b>Natija topildi:</b>\n\n" + format_result(d),
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             asyncio.create_task(_notify_group(context.bot, query.from_user, target_id, d))
