@@ -25,7 +25,7 @@ _retry = Retry(
     allowed_methods=frozenset({"GET"}),
     respect_retry_after_header=True,
 )
-REQUEST_TIMEOUT = (4, 15)
+REQUEST_TIMEOUT = (10, 30)
 
 
 def _get_session() -> requests.Session:
@@ -302,6 +302,65 @@ def get_student_data(entrant_id):
         modern_result = _parse_mandat2025_details(soup, entrant_id, response.url)
         if modern_result is not None:
             return modern_result
+
+        # 2026 landing/listing oqimi: MainSearch avval m3-rank-item ro‘yxatini,
+        # keyin esa Details sahifasini beradi. Target ID uchun Details’ga kirib,
+        # barcha tanlovlar va grant/kontrakt ballarini olish kerak.
+        target_id = clean_id(str(entrant_id))
+        rank_items = soup.select('.m3-rank-item')
+        for item in rank_items:
+            id_tag = item.select_one('.m3-rank-id b') or item.select_one('.m3-rank-id')
+            if clean_id(_text(id_tag)) != target_id:
+                continue
+            details_link = item.select_one('a.m3-rank-btn[href]') or item.select_one('a[href*="/Mandat2025/Details"]')
+            if details_link:
+                details_url = requests.compat.urljoin(BASE_URL, details_link.get('href'))
+                try:
+                    details_response = _get_session().get(details_url, timeout=REQUEST_TIMEOUT)
+                    if details_response.status_code == 200:
+                        details_soup = BeautifulSoup(details_response.text, 'html.parser')
+                        detailed_result = _parse_mandat2025_details(details_soup, entrant_id, details_response.url)
+                        if detailed_result is not None:
+                            return detailed_result
+                except requests.RequestException:
+                    pass
+
+            item_classes = set(item.get('class') or [])
+            item_text = _text(item)
+            normalized_item = item_text.lower().replace('’', "'").replace('ʻ', "'")
+            if 'tavsiya etilmagan' in normalized_item or 'm3-rank--other' in item_classes:
+                fallback_status = 'not_recommended'
+            elif 'm3-rank--grant' in item_classes or 'davlat granti' in normalized_item:
+                fallback_status = 'grant'
+            elif 'm3-rank--contract' in item_classes or 'to‘lov shartnoma' in normalized_item or 'tolov shartnoma' in normalized_item:
+                fallback_status = 'contract'
+            else:
+                fallback_status = 'accepted'
+            name = _text(item.select_one('.m3-rank-name')) or "Noma'lum"
+            score = _text(item.select_one('.m3-rank-score b')) or "Noma'lum"
+            summary = _text(item.select_one('.m3-rank-sub'))
+            accepted_choice = {
+                'priority': '1',
+                'university': summary.split('·')[1].strip() if '·' in summary and len(summary.split('·')) > 1 else '—',
+                'direction': summary.split('·')[0].strip() if '·' in summary else summary,
+                'education_form': summary.split('·')[-1].strip() if '·' in summary else '—',
+                'status': fallback_status,
+                'status_text': 'Davlat granti' if fallback_status == 'grant' else 'To‘lov shartnoma' if fallback_status == 'contract' else '',
+            }
+            return {
+                'status': 'success',
+                'data': {
+                    'name': name,
+                    'id': target_id,
+                    'score': score,
+                    'pass_status': 'Davlat granti' if fallback_status == 'grant' else 'To‘lov shartnoma' if fallback_status == 'contract' else 'Tavsiya etilmagan',
+                    'result_status': fallback_status,
+                    'is_pass': fallback_status in {'grant', 'contract', 'accepted'},
+                    'accepted_choice': accepted_choice if fallback_status in {'grant', 'contract', 'accepted'} else None,
+                    'choices': [],
+                    'page_link': details_url if details_link else response.url,
+                },
+            }
 
         all_cards = soup.find_all('div', class_='m3-rescard')
 
