@@ -618,12 +618,25 @@ def format_result(d: dict) -> str:
         ])
     choices = d.get("choices") or []
     if choices:
-        lines.append("\n📋 *Tanlangan yo‘nalishlar:* ")
-        for choice in choices[:5]:
+        lines.append("\n📋 *Tanlangan yo‘nalishlar va o‘tish ballari:* ")
+        for choice in choices:
             status = choice.get("status")
             mark = "✅" if status in {"grant", "contract", "accepted"} else "▫️"
             label = "Grant" if status == "grant" else "Kontrakt" if status == "contract" else "Qabul qilinmadi" if status == "not_recommended" else "Tanlov"
-            lines.append(f"{mark} {escape_md(str(choice.get('priority') or ''))}: {escape_md(str(choice.get('university') or ''))} — {label}")
+            priority = escape_md(str(choice.get("priority") or ""))
+            university = escape_md(str(choice.get("university") or "—"))
+            direction = escape_md(str(choice.get("direction") or "—"))
+            education_form = escape_md(str(choice.get("education_form") or "—"))
+            grant_score = escape_md(str(choice.get("grant_score") or "—"))
+            contract_score = escape_md(str(choice.get("contract_score") or "—"))
+            lines.extend([
+                f"\n{mark} *{priority}* — {label}",
+                f"🏛 OTM: {university}",
+                f"📚 Yo‘nalish: {direction}",
+                f"🕒 Ta’lim shakli: {education_form}",
+                f"🎓 Grant o‘tish bali: *{grant_score}*",
+                f"💳 Kontrakt o‘tish bali: *{contract_score}*",
+            ])
     if d.get("rank"):
         rank      = d["rank"]
         total     = d.get("total_count")
