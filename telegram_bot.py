@@ -4,6 +4,7 @@ import asyncio
 from html import escape as html_escape
 import threading
 import time
+import tempfile
 from pathlib import Path
 from flask import Flask, jsonify, send_from_directory
 from waitress import serve
@@ -14,6 +15,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
 from mandat_monitor import manual_check_report, monitor_site
+from result_card import render_result_card
 
 TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
@@ -661,6 +663,34 @@ def format_result(d: dict) -> str:
     lines.append("\n— @mandat_applicant_ratingbot orqali tekshirildi")
     return "\n".join(lines)
 
+async def _send_result_card(bot, chat_id: int, data: dict) -> None:
+    """Grant/kontrakt natijasi uchun dinamik PNG kartani yuboradi."""
+    if str(data.get("result_status") or "") not in {"grant", "contract"}:
+        return
+    if not data.get("accepted_choice"):
+        return
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="mandat_result_", suffix=".png", delete=False) as tmp:
+            temp_path = tmp.name
+        await asyncio.to_thread(render_result_card, data, temp_path)
+        with open(temp_path, "rb") as photo_file:
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo_file,
+                caption="📌 Saqlab olish uchun natija kartasi",
+            )
+    except Exception as error:
+        print(f"[result-card] yuborilmadi: {error}")
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
 # ── Guruh bildirishnomasi ─────────────────────────────────────────────────────
 
 async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
@@ -1002,6 +1032,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 reply_markup=reply_markup,
             )
 
+        await _send_result_card(context.bot, update.effective_chat.id, d)
         asyncio.create_task(_notify_group(context.bot, update.effective_user, user_input, d))
 
         if d.get("rank") and d.get("page_number"):
@@ -1496,6 +1527,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
+            await _send_result_card(context.bot, query.message.chat_id, d)
             asyncio.create_task(_notify_group(context.bot, query.from_user, target_id, d))
         else:
             await loading_msg.edit_text("❌ Ushbu ID bo'yicha ma'lumot topilmadi.")
