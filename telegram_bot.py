@@ -226,8 +226,10 @@ def _directions_status_text() -> str:
 def _admin_settings_markup() -> InlineKeyboardMarkup:
     enabled = is_directions_feature_enabled()
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔴 O‘chirish", callback_data="admin_dir:off") if enabled else InlineKeyboardButton("🟢 Yoqish", callback_data="admin_dir:on")],
-        [InlineKeyboardButton("🔄 Holatni yangilash", callback_data="admin_dir:status")],
+        [InlineKeyboardButton("🔴 Yo‘nalishlarni o‘chirish", callback_data="admin_dir:off") if enabled else InlineKeyboardButton("🟢 Yo‘nalishlarni yoqish", callback_data="admin_dir:on")],
+        [InlineKeyboardButton("🔎 Monitoringni tekshirish", callback_data="admin:monitor"), InlineKeyboardButton("📊 Statistika", callback_data="admin:stats")],
+        [InlineKeyboardButton("🧹 Cache tozalash", callback_data="admin:clear_cache")],
+        [InlineKeyboardButton("🔄 Panelni yangilash", callback_data="admin:status")],
     ])
 
 
@@ -236,7 +238,8 @@ def _admin_settings_text() -> str:
         "⚙️ <b>Admin paneli</b>\n\n"
         "🎯 Ballimga mos yo‘nalishlar: <b>" + _directions_status_text() + "</b>\n\n"
         "Tugma o‘chirilsa, foydalanuvchilarning menyusidan olib tashlanadi. "
-        "Yoqilsa, qayta paydo bo‘ladi. Holat Settings varag‘ida saqlanadi."
+        "Yoqilsa, qayta paydo bo‘ladi. Holat Settings varag‘ida saqlanadi.\n\n"
+        "🔎 Monitoring, 📊 statistika va 🧹 cache diagnostikasi tugmalari ham shu panelda mavjud."
     )
 
 
@@ -1695,24 +1698,36 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     data = query.data
     uid = str(query.from_user.id)
 
-    if data.startswith("admin_dir:"):
+    if data.startswith("admin_dir:") or data.startswith("admin:"):
         if query.from_user.id != ADMIN_ID:
             await query.answer("Ruxsat yo‘q.", show_alert=True)
             return
         action = data.split(":", 1)[1]
-        if action in {"on", "off"}:
+        if data.startswith("admin_dir:") and action in {"on", "off"}:
             await asyncio.to_thread(set_directions_feature_enabled, action == "on")
             await query.answer("Saqlandi")
-        elif action == "status":
-            await query.answer("Holat yangilandi")
+            await query.message.edit_text(_admin_settings_text(), parse_mode="HTML", reply_markup=_admin_settings_markup())
+        elif action in {"status", "refresh"}:
+            await query.answer("Panel yangilandi")
+            await query.message.edit_text(_admin_settings_text(), parse_mode="HTML", reply_markup=_admin_settings_markup())
+        elif action == "clear_cache":
+            _student_cache.clear()
+            _invalidate_records_cache()
+            await query.answer("Cache tozalandi")
+            await query.message.edit_text(_admin_settings_text() + "\n\n✅ Student va Sheets cache tozalandi.", parse_mode="HTML", reply_markup=_admin_settings_markup())
+        elif action == "stats":
+            stats = await asyncio.to_thread(get_stats)
+            await query.answer("Statistika tayyor")
+            await query.message.edit_text(
+                _admin_settings_text() + f"\n\n📊 <b>Statistika</b>\nFoydalanuvchilar: <b>{stats.get('total_users', 0)}</b>\nSo‘rovlar: <b>{stats.get('total_queries', 0)}</b>",
+                parse_mode="HTML", reply_markup=_admin_settings_markup()
+            )
+        elif action == "monitor":
+            report = await asyncio.to_thread(manual_check_report)
+            await query.answer("Monitoring tekshirildi")
+            await query.message.edit_text(report + "\n\n" + _admin_settings_text(), parse_mode="HTML", reply_markup=_admin_settings_markup())
         else:
             await query.answer("Noma’lum amal", show_alert=True)
-            return
-        await query.message.edit_text(
-            _admin_settings_text(),
-            parse_mode="HTML",
-            reply_markup=_admin_settings_markup(),
-        )
         return
 
     if data.startswith("dir_region:"):
