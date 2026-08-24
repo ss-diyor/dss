@@ -122,6 +122,9 @@ MAX_TOPICS = 50          # Maximum number of topics to create
 
 _sheet = None
 _stats_sheet = None
+_settings_sheet = None
+_direction_feature_enabled: bool | None = None
+_settings_lock = threading.RLock()
 _records_cache: list[dict] | None = None
 _records_cache_ts = 0.0
 _records_cache_lock = threading.RLock()
@@ -162,6 +165,79 @@ def _get_stats_sheet() -> gspread.Worksheet:
         ws.update(range_name="A1", values=[["Ko'rsatkich", "Qiymat"]])
     _stats_sheet = ws
     return _stats_sheet
+
+
+def _get_settings_sheet() -> gspread.Worksheet:
+    """Feature flaglarni doimiy saqlaydigan Settings varag‘ini qaytaradi."""
+    global _settings_sheet
+    if _settings_sheet is not None:
+        return _settings_sheet
+    creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(SHEET_ID)
+    try:
+        ws = spreadsheet.worksheet("Settings")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title="Settings", rows=20, cols=2)
+        ws.update(range_name="A1:B1", values=[["key", "value"]])
+    _settings_sheet = ws
+    return _settings_sheet
+
+
+def is_directions_feature_enabled() -> bool:
+    global _direction_feature_enabled
+    with _settings_lock:
+        if _direction_feature_enabled is not None:
+            return _direction_feature_enabled
+        try:
+            rows = _get_settings_sheet().get_all_records()
+            row = next((r for r in rows if str(r.get("key") or "") == "directions_feature"), None)
+            _direction_feature_enabled = str(row.get("value") if row else "on").lower() not in {"0", "false", "off", "no"}
+        except Exception as error:
+            print(f"[settings read xato] {error}")
+            _direction_feature_enabled = True
+        return _direction_feature_enabled
+
+
+def set_directions_feature_enabled(enabled: bool) -> bool:
+    global _direction_feature_enabled
+    with _settings_lock:
+        ws = _get_settings_sheet()
+        rows = ws.get_all_records()
+        row_number = None
+        for index, row in enumerate(rows, start=2):
+            if str(row.get("key") or "") == "directions_feature":
+                row_number = index
+                break
+        value = "on" if enabled else "off"
+        if row_number is None:
+            ws.append_row(["directions_feature", value], value_input_option="RAW")
+        else:
+            ws.update(range_name=f"B{row_number}", values=[[value]])
+        _direction_feature_enabled = enabled
+        return enabled
+
+
+def _directions_status_text() -> str:
+    return "YOQ ✅" if is_directions_feature_enabled() else "O‘CHIQ ❌"
+
+
+def _admin_settings_markup() -> InlineKeyboardMarkup:
+    enabled = is_directions_feature_enabled()
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔴 O‘chirish", callback_data="admin_dir:off") if enabled else InlineKeyboardButton("🟢 Yoqish", callback_data="admin_dir:on")],
+        [InlineKeyboardButton("🔄 Holatni yangilash", callback_data="admin_dir:status")],
+    ])
+
+
+def _admin_settings_text() -> str:
+    return (
+        "⚙️ <b>Admin paneli</b>\n\n"
+        "🎯 Ballimga mos yo‘nalishlar: <b>" + _directions_status_text() + "</b>\n\n"
+        "Tugma o‘chirilsa, foydalanuvchilarning menyusidan olib tashlanadi. "
+        "Yoqilsa, qayta paydo bo‘ladi. Holat Settings varag‘ida saqlanadi."
+    )
 
 
 def update_stats_sheet() -> None:
@@ -774,16 +850,18 @@ async def _notify_group(bot, user, queried_id: str, data: dict) -> None:
 
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 
+
+def _user_reply_keyboard() -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton("🕒 Oxirgi qidiruvlar"), KeyboardButton("⭐ Saqlangan ID lar")]]
+    if is_directions_feature_enabled():
+        rows.append([KeyboardButton("🎯 Ballimga mos yo‘nalishlar")])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     asyncio.create_task(asyncio.to_thread(record_user, update.effective_user))
     
-    reply_markup = ReplyKeyboardMarkup(
-        [
-            [KeyboardButton("🕒 Oxirgi qidiruvlar"), KeyboardButton("⭐ Saqlangan ID lar")],
-            [KeyboardButton("🎯 Ballimga mos yo‘nalishlar")]
-        ],
-        resize_keyboard=True
-    )
+    reply_markup = _user_reply_keyboard()
 
     await update.message.reply_text(
         "Assalomu alaykum, hurmatli abituriyent 👋\n\n"
@@ -1042,6 +1120,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if user_input == "🎯 Ballimga mos yo‘nalishlar":
+        if not is_directions_feature_enabled():
+            await update.message.reply_text("ℹ️ Ushbu funksiya hozircha admin tomonidan o‘chirib qo‘yilgan.", reply_markup=_user_reply_keyboard())
+            return
         context.user_data["pending_direction_lookup"] = True
         await update.message.reply_text(_live_direction_prompt(), parse_mode="HTML")
         return
@@ -1184,6 +1265,18 @@ async def admin_monitor_check(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"⚠️ Manual check xatosi:\n<code>{_he(str(error))}</code>",
             parse_mode="HTML",
         )
+
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin uchun bot featurelarini boshqarish paneli."""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Ruxsat yo‘q.")
+        return
+    await update.message.reply_text(
+        _admin_settings_text(),
+        parse_mode="HTML",
+        reply_markup=_admin_settings_markup(),
+    )
 
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1602,6 +1695,26 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     data = query.data
     uid = str(query.from_user.id)
 
+    if data.startswith("admin_dir:"):
+        if query.from_user.id != ADMIN_ID:
+            await query.answer("Ruxsat yo‘q.", show_alert=True)
+            return
+        action = data.split(":", 1)[1]
+        if action in {"on", "off"}:
+            await asyncio.to_thread(set_directions_feature_enabled, action == "on")
+            await query.answer("Saqlandi")
+        elif action == "status":
+            await query.answer("Holat yangilandi")
+        else:
+            await query.answer("Noma’lum amal", show_alert=True)
+            return
+        await query.message.edit_text(
+            _admin_settings_text(),
+            parse_mode="HTML",
+            reply_markup=_admin_settings_markup(),
+        )
+        return
+
     if data.startswith("dir_region:"):
         lookup = context.user_data.get("direction_lookup_data")
         regions = context.user_data.get("direction_regions") or []
@@ -1705,6 +1818,8 @@ def main() -> None:
     application.add_handler(CommandHandler("user",      admin_user))
     application.add_handler(CommandHandler("stats",     admin_stats))
     application.add_handler(CommandHandler("monitor_check", admin_monitor_check))
+    application.add_handler(CommandHandler("admin_panel", admin_panel))
+    application.add_handler(CommandHandler("settings", admin_panel))
     application.add_handler(CommandHandler("users",     admin_users))
     application.add_handler(CommandHandler("export",    admin_export))
     application.add_handler(CommandHandler("broadcast", admin_broadcast))
