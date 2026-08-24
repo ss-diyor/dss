@@ -14,6 +14,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import gspread
 from google.oauth2.service_account import Credentials
 from scraper import get_student_data, get_total_count
+from ball_directions import find_live_directions
 from mandat_monitor import manual_check_report, monitor_site
 from result_card import render_result_card
 
@@ -778,7 +779,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     reply_markup = ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🕒 Oxirgi qidiruvlar"), KeyboardButton("⭐ Saqlangan ID lar")]
+            [KeyboardButton("🕒 Oxirgi qidiruvlar"), KeyboardButton("⭐ Saqlangan ID lar")],
+            [KeyboardButton("🎯 Ballimga mos yo‘nalishlar")]
         ],
         resize_keyboard=True
     )
@@ -829,6 +831,68 @@ async def get_student_data_fast(entrant_id: str) -> dict:
             oldest_key = min(_student_cache, key=lambda item: _student_cache[item][0])
             _student_cache.pop(oldest_key, None)
     return result
+
+
+async def _send_live_direction_results(update: Update, context: ContextTypes.DEFAULT_TYPE, entrant_id: str) -> None:
+    """Har safar rasmiy endpointdan yangi 2025 o‘tish ballarini olib yuboradi."""
+    status_msg = await update.message.reply_text("🔎 Rasmiy saytdan joriy ma’lumot olinmoqda...")
+    result = await asyncio.to_thread(find_live_directions, entrant_id)
+    if result.get("status") != "success":
+        await status_msg.edit_text("❌ " + str(result.get("message") or "Ma’lumot topilmadi."))
+        return
+
+    data = result["data"]
+    score = data.get("score")
+    details = data.get("details") or []
+    if score is None or not details:
+        await status_msg.edit_text("❌ Ushbu ID uchun mos yo‘nalishlar topilmadi.")
+        return
+
+    matches = [row for row in details if row.get("is_match")]
+    def _score_for_sort(row):
+        try:
+            return float(str(row.get("passing_score") or 0).replace(",", "."))
+        except (TypeError, ValueError):
+            return 0.0
+    matches.sort(key=_score_for_sort, reverse=True)
+    if not matches:
+        await status_msg.edit_text(
+            f"📊 <b>{html_escape(str(data.get('name') or 'Noma’lum'))}</b>\n"
+            f"Ball: <b>{html_escape(str(score))}</b>\n\n"
+            "Bu ball bilan 2025 yil ma’lumotlarida mos yo‘nalish topilmadi.",
+            parse_mode="HTML",
+        )
+        return
+
+    lines = [
+        "✅ <b>Ballingizga mos yo‘nalishlar</b>",
+        f"👤 {html_escape(str(data.get('name') or 'Noma’lum'))}",
+        f"📊 Sizning ballingiz: <b>{html_escape(str(score))}</b>",
+        "<i>Ma’lumot har bir qidiruvda mandat.uzbmb.uz saytidan yangi olindi.</i>",
+        "",
+    ]
+    displayed_matches = matches[:10]
+    for index, row in enumerate(displayed_matches, 1):
+        lines.extend([
+            f"<blockquote><b>{index}. {html_escape(str(row.get('direction') or '—'))}</b>",
+            f"🏛 OTM: {html_escape(str(row.get('university') or '—'))}",
+            f"📍 Hudud: {html_escape(str(row.get('region') or '—'))}",
+            f"🕒 Ta’lim shakli: {html_escape(str(row.get('education_form') or '—'))}",
+            f"📌 2025 o‘tish bali: <b>{html_escape(str(row.get('passing_score') or '—'))}</b></blockquote>",
+            "",
+        ])
+    if len(matches) > len(displayed_matches):
+        lines.append(f"Yana {len(matches) - len(displayed_matches)} ta mos yo‘nalish mavjud. Batafsil ro‘yxat rasmiy saytda ko‘rsatiladi.")
+    await status_msg.edit_text("\n".join(lines), parse_mode="HTML")
+
+
+def _live_direction_prompt() -> str:
+    return (
+        "🎯 <b>Ballingizga mos yo‘nalishlar</b>\n\n"
+        "2025 yilgi rasmiy o‘tish ballari bilan solishtirish uchun "
+        "7 xonali abituriyent ID raqamingizni yuboring.\n\n"
+        "Har bir so‘rovda ma’lumot mandat.uzbmb.uz saytidan yangi olinadi."
+    )
 
 
 def get_user_recent_searches(uid: str) -> list[str]:
@@ -958,6 +1022,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"Jami saqlanganlar: {len(saved_items)} ta.",
             parse_mode="HTML"
         )
+        return
+
+    if user_input == "🎯 Ballimga mos yo‘nalishlar":
+        context.user_data["pending_direction_lookup"] = True
+        await update.message.reply_text(_live_direction_prompt(), parse_mode="HTML")
+        return
+
+    if context.user_data.get("pending_direction_lookup"):
+        if not (user_input.isdigit() and len(user_input) == 7):
+            await update.message.reply_text("⚠️ Iltimos, 7 xonali abituriyent ID raqamini yuboring.")
+            return
+        context.user_data["pending_direction_lookup"] = False
+        await _send_live_direction_results(update, context, user_input)
         return
 
     if user_input == "🕒 Oxirgi qidiruvlar":
