@@ -834,7 +834,7 @@ async def get_student_data_fast(entrant_id: str) -> dict:
 
 
 async def _send_live_direction_results(update: Update, context: ContextTypes.DEFAULT_TYPE, entrant_id: str) -> None:
-    """Har safar rasmiy endpointdan yangi 2025 o‘tish ballarini olib yuboradi."""
+    """Har safar rasmiy endpointdan yangi 2025 ballarni olib, hudud tanlashni so‘raydi."""
     status_msg = await update.message.reply_text("🔎 Rasmiy saytdan joriy ma’lumot olinmoqda...")
     result = await asyncio.to_thread(find_live_directions, entrant_id)
     if result.get("status") != "success":
@@ -845,22 +845,41 @@ async def _send_live_direction_results(update: Update, context: ContextTypes.DEF
     score = data.get("score")
     details = data.get("details") or []
     if score is None or not details:
-        await status_msg.edit_text("❌ Ushbu ID uchun mos yo‘nalishlar topilmadi.")
+        await status_msg.edit_text("❌ Ushbu ID bo‘yicha yo‘nalishlar topilmadi.")
         return
 
-    matches = [row for row in details if row.get("is_match")]
+    regions = sorted({str(row.get("region") or "—") for row in details})
+    context.user_data["direction_lookup_data"] = data
+    context.user_data["direction_regions"] = regions
+    buttons = [[InlineKeyboardButton("🌐 Barcha hududlar", callback_data="dir_region:all")]]
+    buttons.extend(
+        [InlineKeyboardButton(region, callback_data=f"dir_region:{index}")]
+        for index, region in enumerate(regions)
+    )
+    await status_msg.edit_text(
+        f"📊 <b>{html_escape(str(data.get('name') or 'Noma’lum'))}</b>\n"
+        f"Ball: <b>{html_escape(str(score))}</b>\n\nKerakli hududni tanlang:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def _edit_live_direction_results(message, data: dict, region: str | None = None) -> None:
+    score = data.get("score")
+    details = data.get("details") or []
+    matches = [row for row in details if row.get("is_match") and (region is None or row.get("region") == region)]
     def _score_for_sort(row):
         try:
             return float(str(row.get("passing_score") or 0).replace(",", "."))
         except (TypeError, ValueError):
             return 0.0
     matches.sort(key=_score_for_sort, reverse=True)
+    region_label = "Barcha hududlar" if region is None else region
     if not matches:
-        await status_msg.edit_text(
+        await message.edit_text(
             f"📊 <b>{html_escape(str(data.get('name') or 'Noma’lum'))}</b>\n"
-            f"Ball: <b>{html_escape(str(score))}</b>\n\n"
-            "Bu ball bilan 2025 yil ma’lumotlarida mos yo‘nalish topilmadi.",
-            parse_mode="HTML",
+            f"Ball: <b>{html_escape(str(score))}</b>\n📍 Hudud: <b>{html_escape(region_label)}</b>\n\n"
+            "Bu hududda 2025 yil ma’lumotlarida mos yo‘nalish topilmadi.", parse_mode="HTML"
         )
         return
 
@@ -868,22 +887,20 @@ async def _send_live_direction_results(update: Update, context: ContextTypes.DEF
         "✅ <b>Ballingizga mos yo‘nalishlar</b>",
         f"👤 {html_escape(str(data.get('name') or 'Noma’lum'))}",
         f"📊 Sizning ballingiz: <b>{html_escape(str(score))}</b>",
-        "<i>Ma’lumot har bir qidiruvda mandat.uzbmb.uz saytidan yangi olindi.</i>",
-        "",
+        f"📍 Hudud: <b>{html_escape(region_label)}</b>",
+        "<i>Ma’lumot har bir qidiruvda mandat.uzbmb.uz saytidan yangi olindi.</i>", "",
     ]
     displayed_matches = matches[:10]
     for index, row in enumerate(displayed_matches, 1):
         lines.extend([
             f"<blockquote><b>{index}. {html_escape(str(row.get('direction') or '—'))}</b>",
             f"🏛 OTM: {html_escape(str(row.get('university') or '—'))}",
-            f"📍 Hudud: {html_escape(str(row.get('region') or '—'))}",
             f"🕒 Ta’lim shakli: {html_escape(str(row.get('education_form') or '—'))}",
-            f"📌 2025 o‘tish bali: <b>{html_escape(str(row.get('passing_score') or '—'))}</b></blockquote>",
-            "",
+            f"📌 2025 o‘tish bali: <b>{html_escape(str(row.get('passing_score') or '—'))}</b></blockquote>", "",
         ])
     if len(matches) > len(displayed_matches):
-        lines.append(f"Yana {len(matches) - len(displayed_matches)} ta mos yo‘nalish mavjud. Batafsil ro‘yxat rasmiy saytda ko‘rsatiladi.")
-    await status_msg.edit_text("\n".join(lines), parse_mode="HTML")
+        lines.append(f"Yana {len(matches) - len(displayed_matches)} ta mos yo‘nalish mavjud.")
+    await message.edit_text("\n".join(lines), parse_mode="HTML")
 
 
 def _live_direction_prompt() -> str:
@@ -1584,6 +1601,17 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     data = query.data
     uid = str(query.from_user.id)
+
+    if data.startswith("dir_region:"):
+        lookup = context.user_data.get("direction_lookup_data")
+        regions = context.user_data.get("direction_regions") or []
+        if not lookup:
+            await query.message.edit_text("❌ Qidiruv ma’lumotlari topilmadi. Iltimos, ID ni qayta yuboring.")
+            return
+        region_key = data.split(":", 1)[1]
+        region = None if region_key == "all" else (regions[int(region_key)] if region_key.isdigit() and int(region_key) < len(regions) else None)
+        await _edit_live_direction_results(query.message, lookup, region)
+        return
 
     if data.startswith("search_"):
         target_id = data.split("_")[1]
